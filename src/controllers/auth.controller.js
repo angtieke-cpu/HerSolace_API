@@ -1,0 +1,170 @@
+const db = require("../db");
+const { generateToken } = require("../utils/jwt");
+const { sendOtpSms } = require("../utils/twilio");
+
+const generateOtp = () =>
+  Math.floor(100000 + Math.random() * 900000).toString();
+
+exports.signup = async (req, res) => {
+  try {
+    const { mobileNumber } = req.body;
+
+    if (!mobileNumber) {
+      return res.status(400).json({ message: "Mobile number required" });
+    }
+
+    const userResult = await db.query(
+      `
+      INSERT INTO users (mobile_number)
+      VALUES ($1)
+      ON CONFLICT (mobile_number) DO NOTHING
+      RETURNING id
+      `,
+      [mobileNumber]
+    );
+
+    let userId = userResult.rows[0]?.id;
+
+    if (!userId) {
+      const existing = await db.query(
+        `SELECT id FROM users WHERE mobile_number = $1`,
+        [mobileNumber]
+      );
+      userId = existing.rows[0].id;
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+    await db.query(
+      `
+      INSERT INTO otp_requests (user_id, purpose, otp, expires_at)
+      VALUES ($1, 'signup', $2, $3)
+      `,
+      [userId, otp, expiresAt]
+    );
+
+    // ✅ Send OTP via Twilio
+    await sendOtpSms(mobileNumber, otp);
+
+    res.json({
+      success: true,
+      message: "OTP sent successfully",
+      userId,
+    });
+  } catch (error) {
+    console.error("Twilio signup OTP error:", error.message);
+    res.status(500).json({
+      message: "Failed to send OTP",
+    });
+  }
+};
+exports.login = async (req, res) => {
+  try {
+    const { mobileNumber } = req.body;
+
+    const user = await db.query(
+      `SELECT id FROM users WHERE mobile_number = $1`,
+      [mobileNumber]
+    );
+
+    if (!user.rows.length) {
+      return res.status(404).json({
+        message: "User not found, please signup",
+      });
+    }
+
+    const otp = generateOtp();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+    await db.query(
+      `
+      INSERT INTO otp_requests (user_id, purpose, otp, expires_at)
+      VALUES ($1, 'login', $2, $3)
+      `,
+      [user.rows[0].id, otp, expiresAt]
+    );
+
+    console.log("Login OTP (dev):", otp);
+
+    res.json({
+      success: true,
+      message: "Login OTP sent",
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Login failed" });
+  }
+};
+exports.verifyOtp = async (req, res) => {
+  try {
+    const { userId, otp, purpose } = req.body;
+
+    if (!userId || !otp || !purpose) {
+      return res.status(400).json({
+        message: "Missing verification details",
+      });
+    }
+
+    const otpResult = await db.query(
+      `
+      SELECT * FROM otp_requests
+      WHERE user_id = $1
+        AND otp = $2
+        AND purpose = $3
+        AND verified = false
+        AND expires_at > NOW()
+      ORDER BY created_at DESC
+      LIMIT 1
+      `,
+      [userId, otp, purpose]
+    );
+
+    if (!otpResult.rows.length) {
+      return res.status(400).json({
+        message: "Invalid or expired OTP",
+      });
+    }
+
+    // Mark OTP verified
+    await db.query(
+      `UPDATE otp_requests SET verified = true WHERE id = $1`,
+      [otpResult.rows[0].id]
+    );
+
+    // Verify user if signup
+    if (purpose === "signup") {
+      await db.query(
+        `UPDATE users SET is_verified = true WHERE id = $1`,
+        [userId]
+      );
+    }
+
+    // Fetch user
+    const userResult = await db.query(
+      `SELECT id, mobile_number FROM users WHERE id = $1`,
+      [userId]
+    );
+
+    const user = userResult.rows[0];
+
+    // Generate JWT
+    const token = generateToken({
+      userId: user.id,
+      mobileNumber: user.mobile_number,
+    });
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        mobileNumber: user.mobile_number,
+      },
+    });
+  } catch (error) {
+    console.error("OTP verify error:", error);
+    res.status(500).json({
+      message: "OTP verification failed",
+    });
+  }
+};
