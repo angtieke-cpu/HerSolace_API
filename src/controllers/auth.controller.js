@@ -86,6 +86,7 @@ exports.login = async (req, res) => {
     );
 
     console.log("Login OTP (dev):", otp);
+ await sendOtpSms(mobileNumber, otp);
 
     res.json({
       success: true,
