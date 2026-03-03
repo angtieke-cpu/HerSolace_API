@@ -91,6 +91,7 @@ exports.login = async (req, res) => {
     res.json({
       success: true,
       message: "Login OTP sent",
+      userId:user.rows[0].id
     });
   } catch (err) {
     res.status(500).json({ message: "Login failed" });
