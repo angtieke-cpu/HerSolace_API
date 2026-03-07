@@ -10,6 +10,9 @@ exports.saveJourneyDetails = async (req, res) => {
       cycleLengthDays,
       symptoms,
       lastPeriodDate,
+      healthGoals,
+      diagnosedConditions,
+      trackingSymptoms,
     } = req.body;
 
     if (
@@ -17,7 +20,8 @@ exports.saveJourneyDetails = async (req, res) => {
       !dateOfBirth ||
       !cycleLengthDays ||
       !Array.isArray(symptoms) ||
-      !lastPeriodDate
+      !lastPeriodDate ||
+      !Array.isArray(healthGoals)
     ) {
       return res.status(400).json({
         message: "Missing journey details",
@@ -32,9 +36,12 @@ exports.saveJourneyDetails = async (req, res) => {
         date_of_birth,
         cycle_length_days,
         symptoms,
-        last_period_date
+        last_period_date,
+        health_goals,
+        diagnosed_conditions,
+        tracking_symptoms
       )
-      VALUES ($1, $2, $3, $4, $5, $6)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
       RETURNING id
       `,
       [
@@ -44,6 +51,9 @@ exports.saveJourneyDetails = async (req, res) => {
         cycleLengthDays,
         symptoms,
         lastPeriodDate,
+        healthGoals,
+        diagnosedConditions || [],
+        trackingSymptoms || [],
       ]
     );
 
