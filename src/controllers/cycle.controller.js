@@ -1,4 +1,4 @@
-const db = require("../config/db");
+const db = require("../db");
 const { calculateCycle } = require("../utils/cycleCalculator");
 
 exports.getCyclePrediction = async (req, res) => {
