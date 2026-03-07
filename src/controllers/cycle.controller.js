@@ -40,17 +40,25 @@ exports.getCyclePrediction = async (req, res) => {
     // 3️⃣ Fetch cycle guide data
     const guideResult = await db.query(
       `
-      SELECT
-        phase,
-        estrogen_level,
-        progesterone_level,
-        lh_level,
-        fsh_level,
-        physical_state,
-        mental_state,
-        prediction_tips
-      FROM cycle_day_guide
-      WHERE cycle_day = $1
+   SELECT
+  cycle_day,
+  phase_of_month,
+  phase_in_app,
+  estrogen_level,
+  progesterone_level,
+  mood,
+  energy,
+  focus,
+  social_drive,
+  anxiety,
+  physical_state,
+  mental_state,
+  nutrients,
+  foods_to_avoid,
+  fitness,
+  prediction_tips
+FROM cycle_guide
+WHERE cycle_day = $1;
       `,
       [currentDay]
     );
