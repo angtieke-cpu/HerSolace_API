@@ -15,7 +15,7 @@ app.use(express.json());
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/journey", journeyRoutes);
-app.use("/api/cycle", cycleRoutes);
+// app.use("/api/cycle", cycleRoutes);
 
 // Health check
 app.get("/health", (req, res) => {
