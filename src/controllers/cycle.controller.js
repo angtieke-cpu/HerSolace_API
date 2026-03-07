@@ -1,9 +1,9 @@
 const db = require("../db");
-const { calculateCycle } = require("../utils/cycleCalculator");
+const { calculateCycle } = require("../utils/c");
 
 exports.getCyclePrediction = async (req, res) => {
   try {
-    const { userId } = req.body;
+     const userId = req.user.userId;
 
     if (!userId) {
       return res.status(400).json({
