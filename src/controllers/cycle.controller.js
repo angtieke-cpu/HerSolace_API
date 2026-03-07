@@ -3,7 +3,7 @@ const { calculateCycle } = require("../utils/cycleCalculator");
 
 exports.getCyclePrediction = async (req, res) => {
   try {
-     const userId = req.user.userId;
+    const userId = req.user.userId;
 
     if (!userId) {
       return res.status(400).json({
@@ -11,6 +11,7 @@ exports.getCyclePrediction = async (req, res) => {
       });
     }
 
+    // 1️⃣ Get journey details
     const result = await db.query(
       `
       SELECT last_period_date, cycle_length_days
@@ -28,15 +29,43 @@ exports.getCyclePrediction = async (req, res) => {
 
     const { last_period_date, cycle_length_days } = result.rows[0];
 
+    // 2️⃣ Calculate cycle
     const cycleData = calculateCycle({
       lastPeriodDate: last_period_date,
       cycleLength: cycle_length_days,
     });
 
+    const currentDay = cycleData.currentDay;
+
+    // 3️⃣ Fetch cycle guide data
+    const guideResult = await db.query(
+      `
+      SELECT
+        phase,
+        estrogen_level,
+        progesterone_level,
+        lh_level,
+        fsh_level,
+        physical_state,
+        mental_state,
+        prediction_tips
+      FROM cycle_day_guide
+      WHERE cycle_day = $1
+      `,
+      [currentDay]
+    );
+
+    const cycleGuide = guideResult.rows[0] || null;
+
+    // 4️⃣ Response
     res.json({
       success: true,
-      data: cycleData,
+      data: {
+        ...cycleData,
+        cycleGuide
+      }
     });
+
   } catch (error) {
     console.error("Cycle prediction error:", error);
     res.status(500).json({
