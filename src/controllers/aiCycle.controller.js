@@ -9,7 +9,7 @@ const groq = new Groq({
 exports.getAiCycleInsights = async (req, res) => {
   try {
 
-    const userId = req.user.userid;
+    const userId = req.user.userId;
 
     if (!userId) {
       return res.status(400).json({
