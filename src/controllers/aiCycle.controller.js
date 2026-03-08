@@ -1,5 +1,5 @@
 const dayjs = require("dayjs");
-const db = require("../config/db");
+const db = require("../db");
 const Groq = require("groq-sdk");
 
 const groq = new Groq({
