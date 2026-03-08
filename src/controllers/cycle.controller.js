@@ -81,3 +81,4 @@ WHERE cycle_day = $1;
     });
   }
 };
+

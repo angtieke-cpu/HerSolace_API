@@ -5,6 +5,7 @@ const cors = require("cors");
 const authRoutes = require("./routes/auth.routes");
 const journeyRoutes = require("./routes/journey.routes");
 const cycleRoutes = require("./routes/cycle.routes");
+const aiRoutes = require("./routes/ai.routes");
 
 const app = express();
 
@@ -16,6 +17,7 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/journey", journeyRoutes);
 app.use("/api/cycle", cycleRoutes);
+app.use("/api/ai", aiRoutes);
 
 // Health check
 app.get("/health", (req, res) => {
