@@ -85,40 +85,4 @@ exports.saveJourneyDetails = async (req, res) => {
   }
 };
 
-exports.getPreviousCycleDetails = async (req, res) => {
-  try {
-    const userId = req.user.userId;
-
-    if (!userId) {
-      return res.status(400).json({
-        message: "userId required",
-      });
-    }
-
-    // 1️⃣ Get journey details
-    const result = await db.query(
-      `
-      SELECT last_period_date, cycle_length_days
-      FROM journey_details
-      WHERE user_id = $1
-      `,
-      [userId]
-    );
-
-    const { last_period_date, cycle_length_days } = result.rows[0];
-
-    // 4️⃣ Response
-    res.json({
-      success: true,
-      lastPeriodDate: last_period_date,
-      cycleLength: cycle_length_days,
-    });
-
-  } catch (error) {
-    console.error("Cycle prediction error:", error);
-    res.status(500).json({
-      message: "Failed to fetch result",
-    });
-  }
-};
 
