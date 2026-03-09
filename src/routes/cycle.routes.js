@@ -7,6 +7,6 @@ const { logLatestPeriod } = require("../controllers/cycle.controller");
 
 router.get("/prediction",authenticate, cycleController.getCyclePrediction);
 router.get("/cycle-details", authenticate, getPreviousCycleDetails);
-router.get("/period-date", authenticate, logLatestPeriod);
+router.post("/period-date", authenticate, logLatestPeriod);
 
 module.exports = router;
