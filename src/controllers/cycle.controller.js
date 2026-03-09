@@ -128,7 +128,7 @@ exports.getPreviousCycleDetails = async (req, res) => {
 
 exports.logLatestPeriod = async (req, res) => {
   try {
-    const userId = req.headers.userId;
+    const userId = req.user.userId;
     const { periodDate } = req.body;
 
     if (!userId) {
