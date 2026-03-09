@@ -6,6 +6,8 @@ const authRoutes = require("./routes/auth.routes");
 const journeyRoutes = require("./routes/journey.routes");
 const cycleRoutes = require("./routes/cycle.routes");
 const aiRoutes = require("./routes/ai.routes");
+const userRoutes = require("./routes/user.routes");
+
 
 const app = express();
 
@@ -18,6 +20,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/journey", journeyRoutes);
 app.use("/api/cycle", cycleRoutes);
 app.use("/api/ai", aiRoutes);
+app.use("/api/user", userRoutes);
 
 // Health check
 app.get("/health", (req, res) => {
