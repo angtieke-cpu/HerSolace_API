@@ -1,9 +1,9 @@
 const dayjs = require("dayjs");
 const db = require("../db");
-const Groq = require("groq-sdk");
+const OpenAI = require("openai");
 
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
 });
 
 exports.getAiCycleInsights = async (req, res) => {
@@ -54,23 +54,23 @@ exports.getAiCycleInsights = async (req, res) => {
     Keep responses concise and helpful.
     `;
 
-    const completion = await groq.chat.completions.create({
-      model: "llama3-70b-8192",
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
       messages: [
         {
           role: "user",
           content: prompt
         }
       ],
-      temperature: 0.7
+      temperature: 0.6
     });
 
-    const aiResponse = completion.choices[0].message.content;
+    const aiOutput = response.choices[0].message.content;
 
     res.json({
       success: true,
       cycleDay: currentDay,
-      aiInsights: aiResponse
+      aiInsights: aiOutput
     });
 
   } catch (error) {
