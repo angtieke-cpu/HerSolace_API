@@ -4,7 +4,7 @@ const db = require("../db");
 exports.getUserProfile = async (req, res) => {
   try {
 
-    const userId = req.headers.userid;
+    const userId = req.user.userid;
 
     if (!userId) {
       return res.status(400).json({
@@ -53,7 +53,7 @@ exports.getUserProfile = async (req, res) => {
 exports.updateUserProfile = async (req, res) => {
 
   try {
-    const userId = req.headers.userid;
+    const userId = req.user.userid;
 
     if (!userId) {
       return res.status(400).json({
