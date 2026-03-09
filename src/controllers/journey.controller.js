@@ -68,7 +68,7 @@ exports.saveJourneyDetails = async (req, res) => {
     );
 
     // 2️⃣ Insert into period log table
-    await client.query(
+    await db.query(
       `
       INSERT INTO user_period_log (
         user_id,
