@@ -4,6 +4,12 @@ exports.saveJourneyDetails = async (req, res) => {
   try {
     const userId = req.user.userId;
 
+    if (!userId) {
+      return res.status(400).json({
+        message: "userId required",
+      });
+    }
+
    const {
       ageGroup,
       dateOfBirth,
