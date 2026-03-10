@@ -119,3 +119,69 @@ exports.updateUserProfile = async (req, res) => {
 
   } 
 };
+
+exports.linkUserProfile = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { mobile_number, relationship } = req.body;
+
+    // Find user by mobile
+    const userResult = await db.query(
+      `SELECT id FROM users WHERE mobile_number = $1`,
+      [mobile_number]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        message: "User with this mobile number not found"
+      });
+    }
+
+    const linkedUserId = userResult.rows[0].id;
+
+    // Prevent linking to self
+    if (linkedUserId === Number(userId)) {
+      return res.status(400).json({
+        message: "Cannot link your own profile"
+      });
+    }
+
+    await db.query(
+      `
+      INSERT INTO user_profile_links (user_id, linked_user_id, relationship)
+      VALUES ($1, $2, $3)
+      `,
+      [userId, linkedUserId, relationship]
+    );
+
+    res.json({
+      message: "Profile linked successfully"
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getLinkedProfiles = async (req, res) => {
+  try {
+    const userId = req.headers.userid;
+
+    const result = await db.query(
+      `
+      SELECT u.id, u.name, u.mobile_number, l.relationship
+      FROM user_profile_links l
+      JOIN users u ON u.id = l.linked_user_id
+      WHERE l.user_id = $1
+      `,
+      [userId]
+    );
+
+    res.json(result.rows);
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+};

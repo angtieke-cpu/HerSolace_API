@@ -9,6 +9,6 @@ const { getCycleHormoneData } = require("../controllers/cycle.controller");
 router.get("/prediction",authenticate, cycleController.getCyclePrediction);
 router.get("/cycle-details", authenticate, getPreviousCycleDetails);
 router.post("/period-date", authenticate, logLatestPeriod);
-router.post("/cycle-hormones", authenticate, getCycleHormoneData);
+router.get("/cycle-hormones", authenticate, getCycleHormoneData);
 
 module.exports = router;
