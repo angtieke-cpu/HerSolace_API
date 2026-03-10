@@ -4,9 +4,11 @@ const { authenticate } = require("../middlewares/auth.middleware");
 const cycleController = require("../controllers/cycle.controller");
 const { getPreviousCycleDetails } = require("../controllers/cycle.controller");
 const { logLatestPeriod } = require("../controllers/cycle.controller");
+const { getCycleHormoneData } = require("../controllers/cycle.controller");
 
 router.get("/prediction",authenticate, cycleController.getCyclePrediction);
 router.get("/cycle-details", authenticate, getPreviousCycleDetails);
 router.post("/period-date", authenticate, logLatestPeriod);
+router.post("/cycle-hormones", authenticate, getCycleHormoneData);
 
 module.exports = router;

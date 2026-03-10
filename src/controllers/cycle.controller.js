@@ -169,4 +169,88 @@ exports.logLatestPeriod = async (req, res) => {
   }
 };
 
+exports.getCycleHormoneData = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    if (!userId) {
+      return res.status(400).json({ message: "User ID missing in headers" });
+    }
+
+    // Get cycle length from DB
+    const result = await db.query(
+      `
+      SELECT cycle_length_days
+      FROM journey_details
+      WHERE user_id = $1
+      `,
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Journey details not found" });
+    }
+
+    const cycleLength = result.rows[0].cycle_length_days;
+
+    // Ovulation logic
+    const ovulationDay = cycleLength - 14;
+    const fertileStart = ovulationDay - 5;
+    const fertileEnd = ovulationDay + 1;
+
+    const cycleData = [];
+
+    for (let day = 1; day <= cycleLength; day++) {
+
+      let estrogen = 0;
+      let progesterone = 0;
+      let phase = "";
+
+      if (day <= 5) {
+        phase = "menstrual";
+        estrogen = 0.3;
+        progesterone = 0.2;
+      }
+      else if (day > 5 && day < ovulationDay) {
+        phase = "follicular";
+        estrogen = 0.4 + (day / cycleLength);
+        progesterone = 0.25;
+      }
+      else if (day === ovulationDay) {
+        phase = "ovulation";
+        estrogen = 1;
+        progesterone = 0.35;
+      }
+      else {
+        phase = "luteal";
+        estrogen = 0.6 - (day / (cycleLength * 2));
+        progesterone = 0.4 + (day / cycleLength);
+      }
+
+      cycleData.push({
+        day,
+        phase,
+        estrogen: Number(estrogen.toFixed(2)),
+        progesterone: Number(progesterone.toFixed(2)),
+        ovulation: day === ovulationDay,
+        fertile_window: day >= fertileStart && day <= fertileEnd
+      });
+    }
+
+    return res.json({
+      cycle_length: cycleLength,
+      ovulation_day: ovulationDay,
+      fertile_window: {
+        start: fertileStart,
+        end: fertileEnd
+      },
+      cycle_data: cycleData
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 
