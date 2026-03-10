@@ -166,7 +166,7 @@ exports.linkUserProfile = async (req, res) => {
 
 exports.getLinkedProfiles = async (req, res) => {
   try {
-    const userId = req.headers.userid;
+    const userId = req.user.userid;
 
     const result = await db.query(
       `
