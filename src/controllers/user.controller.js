@@ -14,22 +14,30 @@ exports.getUserProfile = async (req, res) => {
     }
 
     const result = await db.query(
-      `
-      SELECT 
-        u.id,
-        u.name,
-        u.email,
-        u.mobile_number,
-        u.image_base64,
-        u.is_verified,
-        jd.bleeding_days
-      FROM users u
-      LEFT JOIN journey_details jd
-      ON u.id = jd.user_id
-      WHERE u.id = $1
-      `,
-      [userId]
-    );
+  `
+  SELECT 
+    u.id,
+    u.name,
+    u.email,
+    u.mobile_number,
+    u.image_base64,
+    u.is_verified,
+    jd.bleeding_days,
+    jd.cycle_length_days,
+    (
+      SELECT period_date
+      FROM user_period_log upl
+      WHERE upl.user_id = u.id
+      ORDER BY period_date DESC
+      LIMIT 1
+    ) AS last_period_date
+  FROM users u
+  LEFT JOIN journey_details jd
+    ON u.id = jd.user_id
+  WHERE u.id = $1
+  `,
+  [userId]
+);
 
     if (result.rows.length === 0) {
       return res.status(404).json({
