@@ -223,7 +223,7 @@ exports.getUserBymobile = async (req, res) => {
     }
     const { mobile_number } = req.body;
 
-    const result = await db.query(
+  const result = await db.query(
   `
   SELECT 
     u.id,
@@ -232,17 +232,28 @@ exports.getUserBymobile = async (req, res) => {
     l.relationship,
     j.cycle_length_days,
     j.bleeding_days,
-    (
-      SELECT period_date
-      FROM user_period_log upl
-      WHERE upl.user_id = u.id
-      ORDER BY period_date DESC
-      LIMIT 1
-    ) AS last_period_date
+    lp.last_period_date
   FROM user_profile_links l
   JOIN users u ON u.id = l.linked_user_id
-  LEFT JOIN journey_details j ON j.user_id = u.id
-  WHERE u.mobile_number = $1
+
+  LEFT JOIN (
+      SELECT DISTINCT ON (user_id)
+        user_id,
+        cycle_length_days,
+        bleeding_days
+      FROM journey_details
+      ORDER BY user_id, created_at DESC
+  ) j ON j.user_id = u.id
+
+  LEFT JOIN (
+      SELECT user_id, MAX(period_date) AS last_period_date
+      FROM user_period_log
+      GROUP BY user_id
+  ) lp ON lp.user_id = u.id
+
+  WHERE l.user_id = (
+      SELECT id FROM users WHERE mobile_number = $1
+  )
   `,
   [mobile_number]
 );
