@@ -199,7 +199,7 @@ exports.getLinkedProfiles = async (req, res) => {
   FROM user_profile_links l
   JOIN users u ON u.id = l.linked_user_id
   LEFT JOIN journey_details j ON j.user_id = u.id
-  WHERE l.mobile_number = $1
+  WHERE l.user_id = $1
   `,
       [mobile_number]
     );
@@ -224,7 +224,7 @@ exports.getUserBymobile = async (req, res) => {
     const { mobile_number } = req.body;
 
     const result = await db.query(
-      `
+  `
   SELECT 
     u.id,
     u.name,
@@ -242,10 +242,10 @@ exports.getUserBymobile = async (req, res) => {
   FROM user_profile_links l
   JOIN users u ON u.id = l.linked_user_id
   LEFT JOIN journey_details j ON j.user_id = u.id
-  WHERE l.mobile_number = $1
+  WHERE u.mobile_number = $1
   `,
-      [mobile_number]
-    );
+  [mobile_number]
+);
 
     res.json(result.rows);
 
