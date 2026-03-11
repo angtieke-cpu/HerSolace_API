@@ -17,7 +17,7 @@ exports.getCyclePrediction = async (req, res) => {
       SELECT 
     j.cycle_length_days,
     (
-      SELECT period_start_date
+      SELECT period_date
       FROM user_period_log
       WHERE user_id = $1
       ORDER BY period_date DESC
@@ -118,14 +118,14 @@ exports.getPreviousCycleDetails = async (req, res) => {
       [userId]
     );
 
-    const { last_period_date, cycle_length_days,bleeding_days } = result.rows[0];
+    const { last_period_date, cycle_length_days, bleeding_days } = result.rows[0];
 
     // 4️⃣ Response
     res.json({
       success: true,
       lastPeriodDate: last_period_date,
       cycleLength: cycle_length_days,
-      bleedingDays:bleeding_days
+      bleedingDays: bleeding_days
     });
 
   } catch (error) {
