@@ -66,11 +66,13 @@ exports.getAiCycleInsights = async (req, res) => {
     });
 
     const aiOutput = response.choices[0].message.content;
+    const clean = aiOutput.replace(/```json|```/g, "");
+    const parsed = JSON.parse(clean);
 
     res.json({
       success: true,
       cycleDay: currentDay,
-      aiInsights: aiOutput
+      aiInsights: parsed
     });
 
   } catch (error) {
