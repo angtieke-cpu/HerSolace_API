@@ -5,7 +5,7 @@ exports.getUserProfile = async (req, res) => {
   try {
 
     const userId = req.user.userId;
-    
+
 
     if (!userId) {
       return res.status(400).json({
@@ -117,13 +117,19 @@ exports.updateUserProfile = async (req, res) => {
       message: "Failed to update profile"
     });
 
-  } 
+  }
 };
 
 exports.linkUserProfile = async (req, res) => {
   try {
     const userId = req.user.userId;
     const { mobile_number, relationship } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        message: "userid header required"
+      });
+    }
 
     // Find user by mobile
     const userResult = await db.query(
@@ -168,14 +174,77 @@ exports.getLinkedProfiles = async (req, res) => {
   try {
     const userId = req.user.userId;
 
+    if (!userId) {
+      return res.status(400).json({
+        message: "userid header required"
+      });
+    }
+
     const result = await db.query(
       `
-      SELECT u.id, u.name, u.mobile_number, l.relationship
-      FROM user_profile_links l
-      JOIN users u ON u.id = l.linked_user_id
-      WHERE l.user_id = $1
-      `,
-      [userId]
+  SELECT 
+    u.id,
+    u.name,
+    u.mobile_number,
+    l.relationship,
+    j.cycle_length_days,
+    j.bleeding_days,
+    (
+      SELECT period_start_date
+      FROM user_period_logs upl
+      WHERE upl.user_id = u.id
+      ORDER BY period_start_date DESC
+      LIMIT 1
+    ) AS last_period_date
+  FROM user_profile_links l
+  JOIN users u ON u.id = l.linked_user_id
+  LEFT JOIN journey_details j ON j.user_id = u.id
+  WHERE l.mobile_number = $1
+  `,
+      [mobile_number]
+    );
+
+    res.json(result.rows);
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getUserBymobile = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    if (!userId) {
+      return res.status(400).json({
+        message: "userid header required"
+      });
+    }
+    const { mobile_number } = req.body;
+
+    const result = await db.query(
+      `
+  SELECT 
+    u.id,
+    u.name,
+    u.mobile_number,
+    l.relationship,
+    j.cycle_length_days,
+    j.bleeding_days,
+    (
+      SELECT period_start_date
+      FROM user_period_logs upl
+      WHERE upl.user_id = u.id
+      ORDER BY period_start_date DESC
+      LIMIT 1
+    ) AS last_period_date
+  FROM user_profile_links l
+  JOIN users u ON u.id = l.linked_user_id
+  LEFT JOIN journey_details j ON j.user_id = u.id
+  WHERE l.mobile_number = $1
+  `,
+      [mobile_number]
     );
 
     res.json(result.rows);

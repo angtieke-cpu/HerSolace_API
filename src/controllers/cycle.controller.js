@@ -14,9 +14,17 @@ exports.getCyclePrediction = async (req, res) => {
     // 1️⃣ Get journey details
     const result = await db.query(
       `
-      SELECT last_period_date, cycle_length_days
-      FROM journey_details
+      SELECT 
+    j.cycle_length_days,
+    (
+      SELECT period_start_date
+      FROM user_period_log
       WHERE user_id = $1
+      ORDER BY period_date DESC
+      LIMIT 1
+    ) AS last_period_date
+  FROM journey_details j
+  WHERE j.user_id = $1
       `,
       [userId]
     );
