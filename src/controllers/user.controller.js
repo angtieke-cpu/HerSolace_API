@@ -14,7 +14,7 @@ exports.getUserProfile = async (req, res) => {
     }
 
     const result = await db.query(
-  `
+      `
   SELECT 
     u.id,
     u.name,
@@ -36,8 +36,8 @@ exports.getUserProfile = async (req, res) => {
     ON u.id = jd.user_id
   WHERE u.id = $1
   `,
-  [userId]
-);
+      [userId]
+    );
 
     if (result.rows.length === 0) {
       return res.status(404).json({
@@ -230,21 +230,16 @@ exports.getUserBymobile = async (req, res) => {
       });
     }
     const { mobile_number } = req.body;
-const result = await db.query(
+   const result = await db.query(
   `
   SELECT 
     u.id,
     u.name,
     u.mobile_number,
-    l.relationship,
     j.cycle_length_days,
     j.bleeding_days,
     lp.last_period_date
-  FROM users parent
-  JOIN user_profile_links l 
-      ON parent.id = l.user_id
-  JOIN users u 
-      ON u.id = l.linked_user_id
+  FROM users u
 
   LEFT JOIN (
       SELECT DISTINCT ON (user_id)
@@ -261,7 +256,7 @@ const result = await db.query(
       GROUP BY user_id
   ) lp ON lp.user_id = u.id
 
-  WHERE parent.mobile_number = $1
+  WHERE u.mobile_number = $1
   `,
   [mobile_number]
 );
