@@ -230,8 +230,7 @@ exports.getUserBymobile = async (req, res) => {
       });
     }
     const { mobile_number } = req.body;
-
-  const result = await db.query(
+const result = await db.query(
   `
   SELECT 
     u.id,
@@ -241,8 +240,11 @@ exports.getUserBymobile = async (req, res) => {
     j.cycle_length_days,
     j.bleeding_days,
     lp.last_period_date
-  FROM user_profile_links l
-  JOIN users u ON u.id = l.linked_user_id
+  FROM users parent
+  JOIN user_profile_links l 
+      ON parent.id = l.user_id
+  JOIN users u 
+      ON u.id = l.linked_user_id
 
   LEFT JOIN (
       SELECT DISTINCT ON (user_id)
@@ -259,9 +261,7 @@ exports.getUserBymobile = async (req, res) => {
       GROUP BY user_id
   ) lp ON lp.user_id = u.id
 
-  WHERE l.user_id = (
-      SELECT id FROM users WHERE mobile_number = $1
-  )
+  WHERE parent.mobile_number = $1
   `,
   [mobile_number]
 );
