@@ -104,7 +104,8 @@ exports.getPreviousCycleDetails = async (req, res) => {
       `
   SELECT 
     upl.period_date AS last_period_date,
-    jd.cycle_length_days
+    jd.cycle_length_days,
+    jd.bleeding_days
   FROM users u
   LEFT JOIN user_period_log upl
     ON upl.user_id = u.id
@@ -117,13 +118,14 @@ exports.getPreviousCycleDetails = async (req, res) => {
       [userId]
     );
 
-    const { last_period_date, cycle_length_days } = result.rows[0];
+    const { last_period_date, cycle_length_days,bleeding_days } = result.rows[0];
 
     // 4️⃣ Response
     res.json({
       success: true,
       lastPeriodDate: last_period_date,
       cycleLength: cycle_length_days,
+      bleedingDays:bleeding_days
     });
 
   } catch (error) {
