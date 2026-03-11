@@ -190,10 +190,10 @@ exports.getLinkedProfiles = async (req, res) => {
     j.cycle_length_days,
     j.bleeding_days,
     (
-      SELECT period_start_date
+      SELECT period_date
       FROM user_period_logs upl
       WHERE upl.user_id = u.id
-      ORDER BY period_start_date DESC
+      ORDER BY period_date DESC
       LIMIT 1
     ) AS last_period_date
   FROM user_profile_links l
@@ -233,10 +233,10 @@ exports.getUserBymobile = async (req, res) => {
     j.cycle_length_days,
     j.bleeding_days,
     (
-      SELECT period_start_date
+      SELECT period_date
       FROM user_period_logs upl
       WHERE upl.user_id = u.id
-      ORDER BY period_start_date DESC
+      ORDER BY period_date DESC
       LIMIT 1
     ) AS last_period_date
   FROM user_profile_links l
