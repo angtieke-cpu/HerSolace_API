@@ -38,7 +38,7 @@ exports.getCyclePrediction = async (req, res) => {
       });
     }
 
-    const { username,last_period_date, cycle_length_days } = result.rows[0];
+    const { name,last_period_date, cycle_length_days } = result.rows[0];
     console.log(result);
 
     // 2️⃣ Calculate cycle
@@ -76,13 +76,13 @@ WHERE cycle_day = $1;
     );
 
     const cycleGuide = guideResult.rows[0] || null;
-    const name = username || null;
+    const username = name || null;
 
     // 4️⃣ Response
     res.json({
       success: true,
       data: {
-        name,
+        username,
         ...cycleData,
         cycleGuide
       }
