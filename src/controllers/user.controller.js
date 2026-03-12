@@ -130,16 +130,16 @@ exports.updateUserProfile = async (req, res) => {
 
 exports.linkUserProfile = async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const headerUserId = req.user.userId;
     const { mobile_number, relationship } = req.body;
 
-    if (!userId) {
+    if (!headerUserId) {
       return res.status(400).json({
         message: "userid header required"
       });
     }
 
-    // Find user by mobile
+    // Find user by mobile number
     const userResult = await db.query(
       `SELECT id FROM users WHERE mobile_number = $1`,
       [mobile_number]
@@ -151,21 +151,22 @@ exports.linkUserProfile = async (req, res) => {
       });
     }
 
-    const linkedUserId = userResult.rows[0].id;
+    const mobileUserId = userResult.rows[0].id;
 
     // Prevent linking to self
-    if (linkedUserId === Number(userId)) {
+    if (mobileUserId === Number(headerUserId)) {
       return res.status(400).json({
         message: "Cannot link your own profile"
       });
     }
 
+    // Reverse link logic
     await db.query(
       `
       INSERT INTO user_profile_links (user_id, linked_user_id, relationship)
       VALUES ($1, $2, $3)
       `,
-      [userId, linkedUserId, relationship]
+      [mobileUserId, headerUserId, relationship]
     );
 
     res.json({

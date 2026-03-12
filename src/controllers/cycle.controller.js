@@ -13,8 +13,9 @@ exports.getCyclePrediction = async (req, res) => {
 
     // 1️⃣ Get journey details
     const result = await db.query(
-      `
-      SELECT 
+  `
+  SELECT 
+    u.name,
     j.cycle_length_days,
     (
       SELECT period_date
@@ -24,10 +25,12 @@ exports.getCyclePrediction = async (req, res) => {
       LIMIT 1
     ) AS last_period_date
   FROM journey_details j
+  JOIN users u 
+    ON u.id = j.user_id
   WHERE j.user_id = $1
-      `,
-      [userId]
-    );
+  `,
+  [userId]
+);
 
     if (result.rows.length === 0) {
       return res.status(404).json({
@@ -35,7 +38,7 @@ exports.getCyclePrediction = async (req, res) => {
       });
     }
 
-    const { last_period_date, cycle_length_days } = result.rows[0];
+    const { username,last_period_date, cycle_length_days } = result.rows[0];
 
     // 2️⃣ Calculate cycle
     const cycleData = calculateCycle({
@@ -72,11 +75,13 @@ WHERE cycle_day = $1;
     );
 
     const cycleGuide = guideResult.rows[0] || null;
+    const name = username || null;
 
     // 4️⃣ Response
     res.json({
       success: true,
       data: {
+        name,
         ...cycleData,
         cycleGuide
       }

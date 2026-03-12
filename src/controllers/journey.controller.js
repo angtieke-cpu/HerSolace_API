@@ -10,7 +10,8 @@ exports.saveJourneyDetails = async (req, res) => {
       });
     }
 
-   const {
+    const {
+      name,
       ageGroup,
       dateOfBirth,
       cycleLengthDays,
@@ -23,6 +24,7 @@ exports.saveJourneyDetails = async (req, res) => {
     } = req.body;
 
     if (
+      !name ||
       !ageGroup ||
       !dateOfBirth ||
       !cycleLengthDays ||
@@ -36,6 +38,17 @@ exports.saveJourneyDetails = async (req, res) => {
       });
     }
 
+    // 1️⃣ Update name in users table
+    await db.query(
+      `
+      UPDATE users
+      SET name = $1
+      WHERE id = $2
+      `,
+      [name, userId]
+    );
+
+    // 2️⃣ Insert journey details
     const result = await db.query(
       `
       INSERT INTO journey_details (
@@ -67,7 +80,7 @@ exports.saveJourneyDetails = async (req, res) => {
       ]
     );
 
-    // 2️⃣ Insert into period log table
+    // 3️⃣ Insert into period log table
     await db.query(
       `
       INSERT INTO user_period_log (
@@ -83,6 +96,7 @@ exports.saveJourneyDetails = async (req, res) => {
       success: true,
       journeyId: result.rows[0].id,
     });
+
   } catch (error) {
     console.error("Journey save error:", error);
     res.status(500).json({
