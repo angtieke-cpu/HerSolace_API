@@ -39,6 +39,7 @@ exports.getCyclePrediction = async (req, res) => {
     }
 
     const { username,last_period_date, cycle_length_days } = result.rows[0];
+    console.log(result);
 
     // 2️⃣ Calculate cycle
     const cycleData = calculateCycle({
