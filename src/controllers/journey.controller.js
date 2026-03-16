@@ -29,9 +29,7 @@ exports.saveJourneyDetails = async (req, res) => {
       !dateOfBirth ||
       !cycleLengthDays ||
       !bleedingDays ||
-      !Array.isArray(symptoms) ||
       !lastPeriodDate ||
-      !Array.isArray(healthGoals)
     ) {
       return res.status(400).json({
         message: "Missing journey details",
