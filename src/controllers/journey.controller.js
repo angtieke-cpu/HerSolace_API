@@ -72,7 +72,7 @@ exports.saveJourneyDetails = async (req, res) => {
         bleedingDays,
         symptoms,
         lastPeriodDate,
-        healthGoals,
+        healthGoals || [],
         diagnosedConditions || [],
         trackingSymptoms || [],
       ]
