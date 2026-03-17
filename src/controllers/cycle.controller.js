@@ -269,4 +269,84 @@ exports.getCycleHormoneData = async (req, res) => {
   }
 };
 
+exports.createDailyLog = async (req, res) => {
+  try {
+    const userId = req.user.userId; // from auth middleware
+    const logData = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        message: "User ID missing"
+      });
+    }
+
+    const result = await db.query(
+      `INSERT INTO daily_health_logs (user_id, log_data)
+       VALUES ($1,$2)
+       RETURNING *`,
+      [userId, logData]
+    );
+
+    res.json({
+      success: true,
+      message: "Daily log saved",
+      data: result.rows[0]
+    });
+
+  } catch (error) {
+
+    // handle duplicate daily entry
+    if (error.code === "23505") {
+      return res.status(400).json({
+        message: "Log already exists for today"
+      });
+    }
+
+    console.error("Daily log error:", error);
+    res.status(500).json({
+      message: "Failed to save log"
+    });
+  }
+};
+
+exports.getTodayLog = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    if (!userId) {
+      return res.status(400).json({
+        message: "User ID missing"
+      });
+    }
+
+    const result = await db.query(
+      `SELECT id, user_id, log_data, log_date, created_at
+       FROM daily_health_logs
+       WHERE user_id = $1
+       AND log_date = CURRENT_DATE`,
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({
+        success: true,
+        hasLog: false,
+        data: null
+      });
+    }
+
+    res.json({
+      success: true,
+      hasLog: true,
+      data: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error("Get today log error:", error);
+    res.status(500).json({
+      message: "Failed to fetch log"
+    });
+  }
+};
+
 
