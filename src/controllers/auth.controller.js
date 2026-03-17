@@ -86,12 +86,12 @@ exports.login = async (req, res) => {
     );
 
     console.log("Login OTP (dev):", otp);
- await sendOtpSms(mobileNumber, otp);
+    await sendOtpSms(mobileNumber, otp);
 
     res.json({
       success: true,
       message: "Login OTP sent",
-      userId:user.rows[0].id
+      userId: user.rows[0].id
     });
   } catch (err) {
     res.status(500).json({ message: "Login failed" });
@@ -142,10 +142,19 @@ exports.verifyOtp = async (req, res) => {
     }
 
     // Fetch user
-    const userResult = await db.query(
-      `SELECT id, mobile_number FROM temp_users WHERE id = $1`,
-      [userId]
-    );
+    let userResult;
+
+    if (purpose === "signup") {
+      userResult = await db.query(
+        `SELECT id, mobile_number FROM temp_users WHERE id = $1`,
+        [userId]
+      );
+    } else {
+      userResult = await db.query(
+        `SELECT id, mobile_number FROM users WHERE id = $1`,
+        [userId]
+      );
+    }
 
     const user = userResult.rows[0];
 
