@@ -210,7 +210,7 @@ exports.getLinkedProfiles = async (req, res) => {
   LEFT JOIN journey_details j ON j.user_id = u.id
   WHERE l.user_id = $1
   `,
-      [mobile_number]
+      [userId]
     );
 
     res.json(result.rows);
