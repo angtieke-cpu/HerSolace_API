@@ -1,4 +1,5 @@
 const db = require("../db");
+const { generateToken } = require("../utils/jwt");
 
 exports.saveJourneyDetails = async (req, res) => {
   const client = await db.connect();
