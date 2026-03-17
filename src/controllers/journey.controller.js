@@ -105,10 +105,20 @@ exports.saveJourneyDetails = async (req, res) => {
     );
 
     await client.query("COMMIT");
+    const token = generateToken({
+      userId: user.id,
+      mobileNumber: user.mobile_number,
+    });
 
     res.status(201).json({
       success: true,
+      token,
       journeyId: result.rows[0].id,
+      user: {
+        id: user.id,
+        mobileNumber: user.mobile_number,
+        name: user.name,
+      },
     });
 
   } catch (error) {

@@ -1,3 +1,13 @@
+const dayjs = require("dayjs");
+const db = require("../db");
+const OpenAI = require("openai");
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
+
+
+
 exports.getAiCycleInsights = async (req, res) => {
   try {
 

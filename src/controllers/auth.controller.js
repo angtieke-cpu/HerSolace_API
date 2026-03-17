@@ -161,6 +161,7 @@ exports.verifyOtp = async (req, res) => {
       user: {
         id: user.id,
         mobileNumber: user.mobile_number,
+        name: user.name,
       },
     });
   } catch (error) {
