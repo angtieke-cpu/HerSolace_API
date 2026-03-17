@@ -136,7 +136,7 @@ exports.verifyOtp = async (req, res) => {
     // Verify user if signup
     if (purpose === "signup") {
       await db.query(
-        `UPDATE users SET is_verified = true WHERE id = $1`,
+        `UPDATE temp_users SET is_verified = true WHERE id = $1`,
         [userId]
       );
     }
