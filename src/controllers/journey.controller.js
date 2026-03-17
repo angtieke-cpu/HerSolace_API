@@ -105,6 +105,18 @@ exports.saveJourneyDetails = async (req, res) => {
       [userId, lastPeriodDate]
     );
 
+     const userResult = await client.query(
+      `
+      SELECT id, mobile_number, name
+      FROM users
+      WHERE id = $1
+      `,
+      [userId]
+    );
+
+    const user = userResult.rows[0];
+
+
     await client.query("COMMIT");
     const token = generateToken({
       userId: user.id,
