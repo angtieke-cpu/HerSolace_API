@@ -1,6 +1,8 @@
 const db = require("../db");
 
 exports.saveJourneyDetails = async (req, res) => {
+  const client = await db.connect();
+
   try {
     const userId = req.user.userId;
 
@@ -36,18 +38,30 @@ exports.saveJourneyDetails = async (req, res) => {
       });
     }
 
-    // 1️⃣ Update name in users table
-    await db.query(
+    await client.query("BEGIN");
+
+    // 1️⃣ Move user from temp_users → users
+    await client.query(
       `
-      UPDATE users
-      SET name = $1
-      WHERE id = $2
+      INSERT INTO users (id, mobile_number, is_verified, name, email, image_base64)
+      SELECT id, mobile_number, is_verified, $2, email, image_base64
+      FROM temp_users
+      WHERE id = $1
       `,
-      [name, userId]
+      [userId, name]
     );
 
-    // 2️⃣ Insert journey details
-    const result = await db.query(
+    // 2️⃣ Remove from temp_users
+    await client.query(
+      `
+      DELETE FROM temp_users
+      WHERE id = $1
+      `,
+      [userId]
+    );
+
+    // 3️⃣ Insert journey details
+    const result = await client.query(
       `
       INSERT INTO journey_details (
         user_id,
@@ -78,8 +92,8 @@ exports.saveJourneyDetails = async (req, res) => {
       ]
     );
 
-    // 3️⃣ Insert into period log table
-    await db.query(
+    // 4️⃣ Insert first period log
+    await client.query(
       `
       INSERT INTO user_period_log (
         user_id,
@@ -90,16 +104,23 @@ exports.saveJourneyDetails = async (req, res) => {
       [userId, lastPeriodDate]
     );
 
+    await client.query("COMMIT");
+
     res.status(201).json({
       success: true,
       journeyId: result.rows[0].id,
     });
 
   } catch (error) {
+    await client.query("ROLLBACK");
+
     console.error("Journey save error:", error);
     res.status(500).json({
       message: "Failed to save journey details",
     });
+
+  } finally {
+    client.release();
   }
 };
 

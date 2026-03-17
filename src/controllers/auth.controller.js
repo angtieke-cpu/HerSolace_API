@@ -15,7 +15,7 @@ exports.signup = async (req, res) => {
 
     const userResult = await db.query(
       `
-      INSERT INTO users (mobile_number)
+      INSERT INTO temp_users (mobile_number)
       VALUES ($1)
       ON CONFLICT (mobile_number) DO NOTHING
       RETURNING id
@@ -27,7 +27,7 @@ exports.signup = async (req, res) => {
 
     if (!userId) {
       const existing = await db.query(
-        `SELECT id FROM users WHERE mobile_number = $1`,
+        `SELECT id FROM temp_users WHERE mobile_number = $1`,
         [mobileNumber]
       );
       userId = existing.rows[0].id;
