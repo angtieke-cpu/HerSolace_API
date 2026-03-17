@@ -143,7 +143,7 @@ exports.verifyOtp = async (req, res) => {
 
     // Fetch user
     const userResult = await db.query(
-      `SELECT id, mobile_number FROM users WHERE id = $1`,
+      `SELECT id, mobile_number FROM temp_users WHERE id = $1`,
       [userId]
     );
 
