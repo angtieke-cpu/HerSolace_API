@@ -142,45 +142,42 @@ exports.getPreviousCycleDetails = async (req, res) => {
   }
 };
 
-exports.logLatestPeriod = async (req, res) => {
+exports.createDailyLog = async (req, res) => {
   try {
     const userId = req.user.userId;
-    const { periodDate } = req.body;
+    const logData = req.body;
 
     if (!userId) {
       return res.status(400).json({
-        message: "userid header required"
-      });
-    }
-
-    if (!periodDate) {
-      return res.status(400).json({
-        message: "periodDate required"
+        message: "User ID missing"
       });
     }
 
     const result = await db.query(
       `
-      INSERT INTO user_period_log (
-        user_id,
-        period_date
-      )
-      VALUES ($1,$2)
-      RETURNING id, period_date
+      INSERT INTO daily_health_logs (user_id, log_date, log_data)
+      VALUES ($1, CURRENT_DATE, $2)
+
+      ON CONFLICT (user_id, log_date)
+      DO UPDATE SET 
+        log_data = EXCLUDED.log_data,
+        updated_at = NOW()
+
+      RETURNING *;
       `,
-      [userId, periodDate]
+      [userId, logData]
     );
 
-    res.status(201).json({
+    res.json({
       success: true,
+      message: "Daily log saved/updated",
       data: result.rows[0]
     });
 
   } catch (error) {
-    console.error("Period log error:", error);
-
+    console.error("Daily log error:", error);
     res.status(500).json({
-      message: "Failed to log period date"
+      message: "Failed to save log"
     });
   }
 };
@@ -271,7 +268,7 @@ exports.getCycleHormoneData = async (req, res) => {
 
 exports.createDailyLog = async (req, res) => {
   try {
-    const userId = req.user.userId; // from auth middleware
+    const userId = req.user.userId;
     const logData = req.body;
 
     if (!userId) {
@@ -281,27 +278,30 @@ exports.createDailyLog = async (req, res) => {
     }
 
     const result = await db.query(
-      `INSERT INTO daily_health_logs (user_id, log_data)
-       VALUES ($1,$2)
-       RETURNING *`,
+      `
+      INSERT INTO daily_health_logs (user_id, log_date, log_data)
+      VALUES ($1, CURRENT_DATE, $2)
+
+      ON CONFLICT (user_id, log_date)
+      DO UPDATE SET
+        log_data = EXCLUDED.log_data,
+        updated_at = NOW()
+
+      RETURNING *;
+      `,
       [userId, logData]
     );
 
     res.json({
       success: true,
-      message: "Daily log saved",
+      message:
+        result.command === "INSERT"
+          ? "Daily log created"
+          : "Daily log updated",
       data: result.rows[0]
     });
 
   } catch (error) {
-
-    // handle duplicate daily entry
-    if (error.code === "23505") {
-      return res.status(400).json({
-        message: "Log already exists for today"
-      });
-    }
-
     console.error("Daily log error:", error);
     res.status(500).json({
       message: "Failed to save log"
