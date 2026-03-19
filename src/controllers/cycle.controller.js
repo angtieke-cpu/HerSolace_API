@@ -142,46 +142,6 @@ exports.getPreviousCycleDetails = async (req, res) => {
   }
 };
 
-exports.createDailyLog = async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    const logData = req.body;
-
-    if (!userId) {
-      return res.status(400).json({
-        message: "User ID missing"
-      });
-    }
-
-    const result = await db.query(
-      `
-      INSERT INTO daily_health_logs (user_id, log_date, log_data)
-      VALUES ($1, CURRENT_DATE, $2)
-
-      ON CONFLICT (user_id, log_date)
-      DO UPDATE SET 
-        log_data = EXCLUDED.log_data,
-        updated_at = NOW()
-
-      RETURNING *;
-      `,
-      [userId, logData]
-    );
-
-    res.json({
-      success: true,
-      message: "Daily log saved/updated",
-      data: result.rows[0]
-    });
-
-  } catch (error) {
-    console.error("Daily log error:", error);
-    res.status(500).json({
-      message: "Failed to save log"
-    });
-  }
-};
-
 exports.getCycleHormoneData = async (req, res) => {
   try {
     const userId = req.user.userId;
