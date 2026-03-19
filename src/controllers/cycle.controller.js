@@ -48,7 +48,7 @@ exports.getCyclePrediction = async (req, res) => {
       bleedingDays:bleeding_days
     });
 
-    const { phase, stage, } = cycleData;
+    const { phase, stage, currentDay } = cycleData;
 
     // 3️⃣ OLD TABLE (minimal fields)
     const oldGuide = await db.query(
