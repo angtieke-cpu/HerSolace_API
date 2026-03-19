@@ -14,28 +14,32 @@ exports.getUserProfile = async (req, res) => {
     }
 
     const result = await db.query(
-      `
+  `
   SELECT 
     u.id,
     u.name,
     u.email,
     u.mobile_number,
     u.image_base64,
-    u.is_verified
-    (
-      SELECT period_date,bleeding_days,cycle_length_days
-      FROM user_period_log upl
-      WHERE upl.user_id = u.id
-      ORDER BY period_date DESC
-      LIMIT 1
-    ) AS last_period_date
+    u.is_verified,
+    upl.period_date AS last_period_date,
+    upl.bleeding_days,
+    upl.cycle_length AS cycle_length_days
+
   FROM users u
-  LEFT JOIN journey_details jd
-    ON u.id = jd.user_id
+
+  LEFT JOIN LATERAL (
+    SELECT period_date, bleeding_days, cycle_length
+    FROM user_period_log
+    WHERE user_id = u.id
+    ORDER BY period_date DESC
+    LIMIT 1
+  ) upl ON TRUE
+
   WHERE u.id = $1
   `,
-      [userId]
-    );
+  [userId]
+);
 
     if (result.rows.length === 0) {
       return res.status(404).json({
@@ -196,21 +200,27 @@ exports.getLinkedProfiles = async (req, res) => {
     const result = await db.query(
       `
   SELECT 
-    u.id,
-    u.name,
-    u.mobile_number,
-    l.relationship,
-    (
-      SELECT period_date,cycle_length,bleeding_days
-      FROM user_period_log upl
-      WHERE upl.user_id = u.id
-      ORDER BY period_date DESC
-      LIMIT 1
-    ) AS last_period_date
-  FROM user_profile_links l
-  JOIN users u ON u.id = l.linked_user_id
-  LEFT JOIN journey_details j ON j.user_id = u.id
-  WHERE l.user_id = $1
+  u.id,
+  u.name,
+  u.mobile_number,
+  upl.period_date AS last_period_date,
+  upl.bleeding_days,
+  upl.cycle_length
+
+FROM user_profile_links uplink
+
+JOIN users u 
+  ON u.id = uplink.user_id
+
+LEFT JOIN user_period_log upl
+  ON upl.user_id = u.id
+  AND upl.period_date = (
+    SELECT MAX(period_date)
+    FROM user_period_log
+    WHERE user_id = u.id
+  )
+
+WHERE uplink.linked_user_id = $1;
   `,
       [userId]
     );
