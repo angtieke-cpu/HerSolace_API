@@ -1,8 +1,8 @@
 const dayjs = require("dayjs");
 
-function calculateCycle({ lastPeriodDate, cycleLength }) {
-  if (!lastPeriodDate || !cycleLength) {
-    throw new Error("lastPeriodDate and cycleLength required");
+function calculateCycle({ lastPeriodDate, cycleLength, bleedingDays }) {
+  if (!lastPeriodDate || !cycleLength || !bleedingDays) {
+    throw new Error("lastPeriodDate, cycleLength and bleedingDays are required");
   }
 
   const today = dayjs();
@@ -16,69 +16,84 @@ function calculateCycle({ lastPeriodDate, cycleLength }) {
   const currentDay = (diffDays % cycleLength) + 1;
 
   const ovulationDay = cycleLength - 14;
-  const fertileStart = ovulationDay - 5;
-  const fertileEnd = ovulationDay + 1;
 
   let phase = "";
-  let fertilityStatus = "";
   let stage = "";
+  let fertilityStatus = "Low Fertility";
 
-  // 🔥 PHASE + STAGE LOGIC
-  if (currentDay <= 5) {
+  // ---------------- MENSTRUAL ----------------
+  if (currentDay <= bleedingDays) {
     phase = "Menstrual Phase";
 
     if (currentDay === 1) stage = "Start";
-    else if (currentDay <= 4) stage = "Mid";
-    else stage = "End";
-
-    fertilityStatus = "Low Fertility";
+    else if (currentDay === bleedingDays) stage = "End";
+    else stage = "Mid";
   }
 
-  else if (currentDay < ovulationDay) {
-    phase = "Follicular Phase";
-
-    if (currentDay === 6) stage = "Start";
-    else if (currentDay <= 11) stage = "Mid";
-    else stage = "End";
-
-    fertilityStatus =
-      currentDay >= fertileStart ? "High Fertility" : "Low Fertility";
-  }
-
-  else if (currentDay === ovulationDay) {
+  // ---------------- OVULATION ----------------
+  else if (
+    currentDay >= ovulationDay - 2 &&
+    currentDay <= ovulationDay + 2
+  ) {
     phase = "Ovulation Phase";
-    stage = "Start";
-    fertilityStatus = "Peak Fertility";
+
+    if (currentDay === ovulationDay) {
+      stage = "Mid";
+      fertilityStatus = "Peak Fertility";
+    } else if (currentDay < ovulationDay) {
+      stage = "Start";
+      fertilityStatus = "High Fertility";
+    } else {
+      stage = "End";
+      fertilityStatus = "High Fertility";
+    }
   }
 
-  else if (currentDay === ovulationDay + 1) {
-    phase = "Ovulation Phase";
-    stage = "Mid";
-    fertilityStatus = "High Fertility";
-  }
-
-  else if (currentDay === ovulationDay + 2) {
-    phase = "Ovulation Phase";
-    stage = "End";
-    fertilityStatus = "High Fertility";
-  }
-
-  else {
+  // ---------------- LUTEAL ----------------
+  else if (currentDay >= cycleLength - 12) {
     phase = "Luteal Phase";
 
-    if (currentDay <= 20) stage = "Start";
-    else if (currentDay <= 25) stage = "Mid";
+    const offset = currentDay - (cycleLength - 12);
+
+    if (offset < 4) stage = "Start";
+    else if (offset < 8) stage = "Mid";
     else stage = "End";
 
     fertilityStatus = "Low Fertility";
+  }
+
+  // ---------------- FOLLICULAR ----------------
+  else {
+    phase = "Follicular Phase";
+
+    const follicularStart = bleedingDays + 1;
+    const follicularEnd = ovulationDay - 3;
+
+    const totalDays = follicularEnd - follicularStart + 1;
+
+    if (totalDays <= 4) {
+      stage = "End";
+    } else {
+      const lastTwoStart = follicularEnd - 1;
+
+      if (currentDay >= lastTwoStart) {
+        stage = "End";
+      } else {
+        stage = "Mid";
+      }
+    }
+
+    // fertility logic
+    if (currentDay >= ovulationDay - 5) {
+      fertilityStatus = "High Fertility";
+    }
   }
 
   const nextPeriod = startDate.add(cycleLength, "day");
 
-  const fertileWindowStart = startDate.add(fertileStart - 1, "day");
-  const fertileWindowEnd = startDate.add(fertileEnd - 1, "day");
+  const fertileWindowStart = startDate.add(ovulationDay - 5 - 1, "day");
+  const fertileWindowEnd = startDate.add(ovulationDay + 1 - 1, "day");
 
-  // 🔥 Nice readable label (useful for UI)
   const dayLabel = `Day ${currentDay} - ${phase} (${stage})`;
 
   return {
