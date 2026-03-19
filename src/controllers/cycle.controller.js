@@ -15,20 +15,23 @@ exports.getCyclePrediction = async (req, res) => {
     // 1️⃣ Get base data
     const result = await db.query(
       `
-      SELECT 
-        u.name,
-        j.cycle_length_days,
-        j.bleeding_days,
-        (
-          SELECT period_date
-          FROM user_period_log
-          WHERE user_id = $1
-          ORDER BY period_date DESC
-          LIMIT 1
-        ) AS last_period_date
-      FROM journey_details j
-      JOIN users u ON u.id = j.user_id
-      WHERE j.user_id = $1
+    SELECT 
+  u.name,
+  lp.period_date AS last_period_date,
+  lp.cycle_length AS cycle_length_days,
+  lp.bleeding_days
+
+FROM users u
+
+LEFT JOIN LATERAL (
+  SELECT period_date, cycle_length, bleeding_days
+  FROM user_period_log
+  WHERE user_id = u.id
+  ORDER BY period_date DESC
+  LIMIT 1
+) lp ON TRUE
+
+WHERE u.id = $1;
       `,
       [userId]
     );
@@ -39,13 +42,13 @@ exports.getCyclePrediction = async (req, res) => {
       });
     }
 
-    const { name, last_period_date, cycle_length_days,bleeding_days } = result.rows[0];
+    const { name, last_period_date, cycle_length_days, bleeding_days } = result.rows[0];
 
     // 2️⃣ Calculate cycle
     const cycleData = calculateCycle({
       lastPeriodDate: last_period_date,
       cycleLength: cycle_length_days,
-      bleedingDays:bleeding_days
+      bleedingDays: bleeding_days
     });
 
     const { phase, stage, currentDay } = cycleData;
@@ -113,16 +116,12 @@ exports.getPreviousCycleDetails = async (req, res) => {
     const result = await db.query(
       `
   SELECT 
-    upl.period_date AS last_period_date,
-    jd.cycle_length_days,
-    jd.bleeding_days
-  FROM users u
-  LEFT JOIN user_period_log upl
-    ON upl.user_id = u.id
-  LEFT JOIN journey_details jd
-    ON jd.user_id = u.id
-  WHERE u.id = $1
-  ORDER BY upl.period_date DESC
+    period_date AS last_period_date,
+    cycle_length AS cycle_length_days,
+    bleeding_days
+  FROM user_period_log
+  WHERE user_id = $1
+  ORDER BY period_date DESC
   LIMIT 1
   `,
       [userId]
