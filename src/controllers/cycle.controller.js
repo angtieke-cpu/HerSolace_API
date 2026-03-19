@@ -1,6 +1,7 @@
 const db = require("../db");
 const { calculateCycle } = require("../utils/cycleCalculator");
 
+
 exports.getCyclePrediction = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -11,25 +12,26 @@ exports.getCyclePrediction = async (req, res) => {
       });
     }
 
-    // 1️⃣ Get base data
+    // 1️⃣ Get journey details
     const result = await db.query(
-      `
-      SELECT 
-        u.name,
-        j.cycle_length_days,
-        (
-          SELECT period_date
-          FROM user_period_log
-          WHERE user_id = $1
-          ORDER BY period_date DESC
-          LIMIT 1
-        ) AS last_period_date
-      FROM journey_details j
-      JOIN users u ON u.id = j.user_id
-      WHERE j.user_id = $1
-      `,
-      [userId]
-    );
+  `
+  SELECT 
+    u.name,
+    j.cycle_length_days,
+    (
+      SELECT period_date
+      FROM user_period_log
+      WHERE user_id = $1
+      ORDER BY period_date DESC
+      LIMIT 1
+    ) AS last_period_date
+  FROM journey_details j
+  JOIN users u 
+    ON u.id = j.user_id
+  WHERE j.user_id = $1
+  `,
+  [userId]
+);
 
     if (result.rows.length === 0) {
       return res.status(404).json({
@@ -37,7 +39,8 @@ exports.getCyclePrediction = async (req, res) => {
       });
     }
 
-    const { name, last_period_date, cycle_length_days } = result.rows[0];
+    const { name,last_period_date, cycle_length_days } = result.rows[0];
+    console.log(result);
 
     // 2️⃣ Calculate cycle
     const cycleData = calculateCycle({
@@ -45,45 +48,42 @@ exports.getCyclePrediction = async (req, res) => {
       cycleLength: cycle_length_days,
     });
 
-    const { currentDay, stage } = cycleData;
+    const currentDay = cycleData.currentDay;
 
-    // 3️⃣ OLD TABLE (minimal fields)
-    const oldGuide = await db.query(
+    // 3️⃣ Fetch cycle guide data
+    const guideResult = await db.query(
       `
-      SELECT
-        cycle_day,
-        phase_of_month,
-        phase_in_app,
-        estrogen_level,
-        progesterone_level
-      FROM cycle_guide
-      WHERE cycle_day = $1
+   SELECT
+  cycle_day,
+  phase_of_month,
+  phase_in_app,
+  estrogen_level,
+  progesterone_level,
+  mood,
+  energy,
+  focus,
+  social_drive,
+  anxiety,
+  physical_state,
+  mental_state,
+  nutrients,
+  foods_to_avoid,
+  fitness,
+  prediction_tips
+FROM cycle_guide
+WHERE cycle_day = $1;
       `,
       [currentDay]
     );
 
-    // 4️⃣ NEW TABLE (range + stage match)
-    const newGuide = await db.query(
-      `
-      SELECT *
-      FROM cycle_phase_guidelines
-      WHERE $1 BETWEEN day_start AND day_end
-      AND stage = $2
-      LIMIT 1
-      `,
-      [currentDay, stage]
-    );
+    const cycleGuide = guideResult.rows[0] || null;
+    const username = name || null;
 
-    const cycleGuide = {
-      ...(oldGuide.rows[0] || {}),
-      ...(newGuide.rows[0] || {}),
-    };
-
-    // 5️⃣ Response
+    // 4️⃣ Response
     res.json({
       success: true,
       data: {
-        username: name,
+        username,
         ...cycleData,
         cycleGuide
       }
