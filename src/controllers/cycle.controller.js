@@ -318,27 +318,89 @@ exports.logLatestPeriod = async (req, res) => {
     const { periodDate } = req.body;
 
     if (!userId) {
-      return res.status(400).json({
-        message: "userid header required"
-      });
+      return res.status(400).json({ message: "userid header required" });
     }
 
     if (!periodDate) {
-      return res.status(400).json({
-        message: "periodDate required"
-      });
+      return res.status(400).json({ message: "periodDate required" });
     }
 
+    const newDate = dayjs(periodDate);
+
+    // ✅ 1. Get past records
+    const prevResult = await db.query(
+      `
+      SELECT period_date, bleeding_days
+      FROM user_period_log
+      WHERE user_id = $1
+      ORDER BY period_date DESC
+      LIMIT 6
+      `,
+      [userId]
+    );
+
+    const rows = prevResult.rows;
+
+    let cycle_length = null;
+    let bleeding_days = null;
+
+    // ✅ 2. Calculate cycle length (NO DEFAULT)
+    if (rows.length >= 1) {
+      let diffs = [];
+
+      // include new entry vs latest record
+      const latestDate = dayjs(rows[0].period_date);
+      const newDiff = newDate.diff(latestDate, "day");
+
+      if (newDiff > 0) {
+        diffs.push(newDiff);
+      }
+
+      // previous diffs
+      for (let i = 0; i < rows.length - 1; i++) {
+        const d1 = dayjs(rows[i].period_date);
+        const d2 = dayjs(rows[i + 1].period_date);
+
+        const diff = d1.diff(d2, "day");
+
+        if (diff > 0) {
+          diffs.push(diff);
+        }
+      }
+
+      if (diffs.length > 0) {
+        const avg =
+          diffs.reduce((a, b) => a + b, 0) / diffs.length;
+
+        cycle_length = Math.round(avg);
+      }
+    }
+
+    // ✅ 3. Calculate bleeding_days (NO DEFAULT)
+    const bleedValues = rows
+      .map(r => r.bleeding_days)
+      .filter(v => v !== null && v > 0);
+
+    if (bleedValues.length > 0) {
+      const avgBleed =
+        bleedValues.reduce((a, b) => a + b, 0) / bleedValues.length;
+
+      bleeding_days = Math.round(avgBleed);
+    }
+
+    // ✅ 4. Insert new record
     const result = await db.query(
       `
       INSERT INTO user_period_log (
         user_id,
-        period_date
+        period_date,
+        cycle_length,
+        bleeding_days
       )
-      VALUES ($1,$2)
-      RETURNING id, period_date
+      VALUES ($1,$2,$3,$4)
+      RETURNING id, period_date, cycle_length, bleeding_days
       `,
-      [userId, periodDate]
+      [userId, periodDate, cycle_length, bleeding_days]
     );
 
     res.status(201).json({
