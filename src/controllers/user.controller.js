@@ -196,10 +196,8 @@ exports.getLinkedProfiles = async (req, res) => {
     u.name,
     u.mobile_number,
     l.relationship,
-    j.cycle_length_days,
-    j.bleeding_days,
     (
-      SELECT period_date
+      SELECT period_date,cycle_length,bleeding_days
       FROM user_period_log upl
       WHERE upl.user_id = u.id
       ORDER BY period_date DESC

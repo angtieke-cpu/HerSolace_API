@@ -98,11 +98,13 @@ exports.saveJourneyDetails = async (req, res) => {
       `
       INSERT INTO user_period_log (
         user_id,
-        period_date
+        period_date,
+        bleeding_days,
+        cycle_length
       )
       VALUES ($1,$2)
       `,
-      [userId, lastPeriodDate]
+      [userId, lastPeriodDate,cycleLengthDays,bleedingDays]
     );
 
      const userResult = await client.query(
