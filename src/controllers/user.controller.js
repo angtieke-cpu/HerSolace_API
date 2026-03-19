@@ -102,7 +102,7 @@ exports.updateUserProfile = async (req, res) => {
 
     // 2️⃣ Update journey_details bleeding_days
     if (bleedingDays !== undefined) {
-      await client.query(
+      await db.query(
         `
         UPDATE journey_details
         SET bleeding_days = $1
