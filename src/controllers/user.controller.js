@@ -21,11 +21,9 @@ exports.getUserProfile = async (req, res) => {
     u.email,
     u.mobile_number,
     u.image_base64,
-    u.is_verified,
-    jd.bleeding_days,
-    jd.cycle_length_days,
+    u.is_verified
     (
-      SELECT period_date
+      SELECT period_date,bleeding_days,cycle_length_days
       FROM user_period_log upl
       WHERE upl.user_id = u.id
       ORDER BY period_date DESC
@@ -104,9 +102,15 @@ exports.updateUserProfile = async (req, res) => {
     if (bleedingDays !== undefined) {
       await db.query(
         `
-        UPDATE journey_details
-        SET bleeding_days = $1
-        WHERE user_id = $2
+       UPDATE user_period_logs
+SET bleeding_days = $1
+WHERE id = (
+  SELECT id
+  FROM user_period_logs
+  WHERE user_id = $2
+  ORDER BY period_date DESC
+  LIMIT 1
+);
         `,
         [bleedingDays, userId]
       );
@@ -229,36 +233,32 @@ exports.getUserBymobile = async (req, res) => {
       });
     }
     const { mobile_number } = req.body;
-   const result = await db.query(
-  `
+    const result = await db.query(
+      `
   SELECT 
-    u.id,
-    u.name,
-    u.mobile_number,
-    j.cycle_length_days,
-    j.bleeding_days,
-    lp.last_period_date
-  FROM users u
+  u.id,
+  u.name,
+  u.mobile_number,
+  upl.cycle_length,
+  upl.bleeding_days,
+  upl.period_date AS last_period_date
 
-  LEFT JOIN (
-      SELECT DISTINCT ON (user_id)
-        user_id,
-        cycle_length_days,
-        bleeding_days
-      FROM journey_details
-      ORDER BY user_id, created_at DESC
-  ) j ON j.user_id = u.id
+FROM users u
 
-  LEFT JOIN (
-      SELECT user_id, MAX(period_date) AS last_period_date
-      FROM user_period_log
-      GROUP BY user_id
-  ) lp ON lp.user_id = u.id
+LEFT JOIN (
+  SELECT DISTINCT ON (user_id)
+    user_id,
+    cycle_length,
+    bleeding_days,
+    period_date
+  FROM user_period_log
+  ORDER BY user_id, period_date DESC
+) upl ON upl.user_id = u.id
 
-  WHERE u.mobile_number = $1
+WHERE u.mobile_number = $1;
   `,
-  [mobile_number]
-);
+      [mobile_number]
+    );
 
     res.json(result.rows);
 
