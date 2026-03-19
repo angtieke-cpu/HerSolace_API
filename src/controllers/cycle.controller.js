@@ -70,7 +70,7 @@ exports.getCyclePrediction = async (req, res) => {
       `
       SELECT *
       FROM cycle_phase_guidelines
-      WHERE $1 phase_name=$1
+      WHERE phase_name=$1
       AND stage = $2
       LIMIT 1
       `,
