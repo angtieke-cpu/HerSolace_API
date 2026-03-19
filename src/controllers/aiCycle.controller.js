@@ -51,6 +51,12 @@ exports.getAiCycleInsights = async (req, res) => {
 
     const diffDays = today.diff(startDate, "day");
     const currentDay = (diffDays % cycle_length_days) + 1;
+    let phase = "";
+
+    if (currentDay <= bleeding_days) phase = "Menstrual";
+    else if (currentDay <= 13) phase = "Follicular";
+    else if (currentDay === 14) phase = "Ovulation";
+    else phase = "Luteal";
 
     // ✅ 3. Check cache
     const cache = await db.query(
@@ -82,6 +88,7 @@ User menstrual cycle details:
 - Current cycle day: ${currentDay}
 - Cycle length: ${cycle_length_days} days
 - Bleeding duration: ${bleeding_days} days
+- Current phase: ${phase}
 
 Provide personalized wellness guidance in JSON format.
 
@@ -147,5 +154,98 @@ Guidelines:
     res.status(500).json({
       message: "AI cycle prediction failed"
     });
+  }
+};
+
+exports.getAiCycleInsightsWithInput = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { userInput } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        message: "userid header required"
+      });
+    }
+
+    if (!userInput) {
+      return res.status(400).json({
+        message: "userInput is required"
+      });
+    }
+
+    // ✅ Get latest cycle data
+    const result = await db.query(
+      `
+      SELECT 
+        period_date AS last_period_date,
+        cycle_length AS cycle_length_days,
+        bleeding_days
+      FROM user_period_log
+      WHERE user_id = $1
+      ORDER BY period_date DESC
+      LIMIT 1
+      `,
+      [userId]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({
+        message: "No period log found"
+      });
+    }
+
+    const {
+      last_period_date,
+      cycle_length_days,
+      bleeding_days
+    } = result.rows[0];
+
+    // ✅ Calculate cycle day
+    const today = dayjs();
+    const startDate = dayjs(last_period_date);
+
+    const diffDays = today.diff(startDate, "day");
+    const currentDay = (diffDays % cycle_length_days) + 1;
+
+    // ✅ Phase logic
+    let phase = "";
+    if (currentDay <= bleeding_days) phase = "Menstrual";
+    else if (currentDay <= 13) phase = "Follicular";
+    else if (currentDay === 14) phase = "Ovulation";
+    else phase = "Luteal";
+
+    // ✅ Prompt
+    const prompt = `
+User cycle context:
+Day ${currentDay} (${phase} phase), cycle length ${cycle_length_days} days, bleeding ${bleeding_days} days.
+
+User query:
+"${userInput}"
+
+Give a short, helpful answer (2–4 lines max).
+No JSON. Plain text only.
+`;
+
+    // ✅ AI Call
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.7
+    });
+
+    const answer = response.choices[0].message.content.trim();
+
+    // ✅ Final response (NO DB SAVE)
+    res.json({
+      success: true,
+      cycleDay: currentDay,
+      phase,
+      answer
+    });
+
+  } catch (error) {
+    console.error("AI error:", error);
+    res.status(500).json({ message: "AI response failed" });
   }
 };
