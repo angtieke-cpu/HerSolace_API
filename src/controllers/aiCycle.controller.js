@@ -10,7 +10,6 @@ const openai = new OpenAI({
 
 exports.getAiCycleInsights = async (req, res) => {
   try {
-
     const userId = req.user.userId;
 
     if (!userId) {
@@ -19,32 +18,47 @@ exports.getAiCycleInsights = async (req, res) => {
       });
     }
 
+    // ✅ 1. Get latest data from user_period_log
     const result = await db.query(
-      `SELECT last_period_date, cycle_length_days
-       FROM journey_details
-       WHERE user_id = $1`,
+      `
+      SELECT 
+        period_date AS last_period_date,
+        cycle_length AS cycle_length_days,
+        bleeding_days
+      FROM user_period_log
+      WHERE user_id = $1
+      ORDER BY period_date DESC
+      LIMIT 1
+      `,
       [userId]
     );
 
     if (result.rows.length === 0) {
       return res.status(404).json({
-        message: "Journey data not found"
+        message: "No period log found"
       });
     }
 
-    const { last_period_date, cycle_length_days } = result.rows[0];
+    const {
+      last_period_date,
+      cycle_length_days,
+      bleeding_days
+    } = result.rows[0];
 
+    // ✅ 2. Calculate current cycle day
     const today = dayjs();
     const startDate = dayjs(last_period_date);
 
     const diffDays = today.diff(startDate, "day");
     const currentDay = (diffDays % cycle_length_days) + 1;
 
-    // 1️⃣ Check cache table first
+    // ✅ 3. Check cache
     const cache = await db.query(
-      `SELECT * FROM ai_cycle_insights_cache
-       WHERE cycle_day = $1
-       AND cycle_length_days = $2`,
+      `
+      SELECT * FROM ai_cycle_insights_cache
+      WHERE cycle_day = $1
+      AND cycle_length_days = $2
+      `,
       [currentDay, cycle_length_days]
     );
 
@@ -62,23 +76,30 @@ exports.getAiCycleInsights = async (req, res) => {
       });
     }
 
-    // 2️⃣ If not cached → call AI
+    // ✅ 4. Improved Prompt (IMPORTANT 🔥)
     const prompt = `
-    User menstrual cycle day: ${currentDay}
+User menstrual cycle details:
+- Current cycle day: ${currentDay}
+- Cycle length: ${cycle_length_days} days
+- Bleeding duration: ${bleeding_days} days
 
-    Provide personalized wellness guidance in JSON format.
+Provide personalized wellness guidance in JSON format.
 
-    Required JSON structure:
-    {
-      "exerciseOptimization": "",
-      "nutritionGuidance": "",
-      "sleepPattern": "",
-      "symptomsForecast": ""
-    }
+Required JSON structure:
+{
+  "exerciseOptimization": "",
+  "nutritionGuidance": "",
+  "sleepPattern": "",
+  "symptomsForecast": ""
+}
 
-    Keep responses concise and helpful.
-    `;
+Guidelines:
+- Tailor advice based on cycle phase
+- Consider hormonal changes
+- Keep responses concise and actionable
+`;
 
+    // ✅ 5. Call AI
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [{ role: "user", content: prompt }],
@@ -89,7 +110,7 @@ exports.getAiCycleInsights = async (req, res) => {
     const clean = aiOutput.replace(/```json|```/g, "");
     const parsed = JSON.parse(clean);
 
-    // 3️⃣ Save result to cache
+    // ✅ 6. Save cache
     await db.query(
       `
       INSERT INTO ai_cycle_insights_cache (
@@ -112,6 +133,7 @@ exports.getAiCycleInsights = async (req, res) => {
       ]
     );
 
+    // ✅ 7. Response
     res.json({
       success: true,
       cycleDay: currentDay,
