@@ -417,3 +417,43 @@ exports.logLatestPeriod = async (req, res) => {
     });
   }
 };
+
+exports.getUserPeriodLogs = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    if (!userId) {
+      return res.status(400).json({
+        message: "userid header required"
+      });
+    }
+
+    const result = await db.query(
+      `
+      SELECT 
+        id,
+        period_date,
+        cycle_length,
+        bleeding_days,
+        created_at
+      FROM user_period_log
+      WHERE user_id = $1
+      ORDER BY period_date DESC
+      `,
+      [userId]
+    );
+
+    res.json({
+      success: true,
+      count: result.rows.length,
+      data: result.rows
+    });
+
+  } catch (error) {
+    console.error("Get logs error:", error);
+
+    res.status(500).json({
+      message: "Failed to fetch period logs"
+    });
+  }
+};
