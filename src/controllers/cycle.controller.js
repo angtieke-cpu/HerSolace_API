@@ -310,4 +310,45 @@ exports.getTodayLog = async (req, res) => {
   }
 };
 
+exports.logLatestPeriod = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { periodDate } = req.body;
 
+    if (!userId) {
+      return res.status(400).json({
+        message: "userid header required"
+      });
+    }
+
+    if (!periodDate) {
+      return res.status(400).json({
+        message: "periodDate required"
+      });
+    }
+
+    const result = await db.query(
+      `
+      INSERT INTO user_period_log (
+        user_id,
+        period_date
+      )
+      VALUES ($1,$2)
+      RETURNING id, period_date
+      `,
+      [userId, periodDate]
+    );
+
+    res.status(201).json({
+      success: true,
+      data: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error("Period log error:", error);
+
+    res.status(500).json({
+      message: "Failed to log period date"
+    });
+  }
+};
