@@ -63,31 +63,43 @@ function calculateCycle({ lastPeriodDate, cycleLength, bleedingDays }) {
   }
 
   // ---------------- FOLLICULAR ----------------
+else {
+  phase = "Follicular Phase";
+
+  const follicularStart = bleedingDays + 1;
+  const follicularEnd = ovulationDay - 3;
+
+  const totalDays = follicularEnd - follicularStart + 1;
+
+  if (totalDays <= 2) {
+    // very short → all End
+    stage = "End";
+  } 
+  else if (totalDays <= 4) {
+    // small range → Start + End split
+    if (currentDay === follicularStart) stage = "Start";
+    else stage = "End";
+  } 
   else {
-    phase = "Follicular Phase";
+    const startRangeEnd = follicularStart + 1; // first 2 days
+    const endRangeStart = follicularEnd - 1;   // last 2 days
 
-    const follicularStart = bleedingDays + 1;
-    const follicularEnd = ovulationDay - 3;
-
-    const totalDays = follicularEnd - follicularStart + 1;
-
-    if (totalDays <= 4) {
+    if (currentDay <= startRangeEnd) {
+      stage = "Start";
+    } 
+    else if (currentDay >= endRangeStart) {
       stage = "End";
-    } else {
-      const lastTwoStart = follicularEnd - 1;
-
-      if (currentDay >= lastTwoStart) {
-        stage = "End";
-      } else {
-        stage = "Mid";
-      }
-    }
-
-    // fertility logic
-    if (currentDay >= ovulationDay - 5) {
-      fertilityStatus = "High Fertility";
+    } 
+    else {
+      stage = "Mid";
     }
   }
+
+  // fertility logic
+  if (currentDay >= ovulationDay - 5) {
+    fertilityStatus = "High Fertility";
+  }
+}
 
   const nextPeriod = startDate.add(cycleLength, "day");
 
