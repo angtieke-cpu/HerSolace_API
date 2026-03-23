@@ -104,7 +104,7 @@ exports.saveJourneyDetails = async (req, res) => {
       )
       VALUES ($1,$2,$3,$4)
       `,
-      [userId, lastPeriodDate,cycleLengthDays,bleedingDays]
+      [userId, lastPeriodDate,bleedingDays,cycleLengthDays]
     );
 
      const userResult = await client.query(
