@@ -102,7 +102,7 @@ exports.saveJourneyDetails = async (req, res) => {
         bleeding_days,
         cycle_length
       )
-      VALUES ($1,$2)
+      VALUES ($1,$2,$3,$4)
       `,
       [userId, lastPeriodDate,cycleLengthDays,bleedingDays]
     );
