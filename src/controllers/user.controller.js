@@ -106,11 +106,11 @@ exports.updateUserProfile = async (req, res) => {
     if (bleedingDays !== undefined) {
       await db.query(
         `
-       UPDATE user_period_logs
+       UPDATE user_period_log
 SET bleeding_days = $1
 WHERE id = (
   SELECT id
-  FROM user_period_logs
+  FROM user_period_log
   WHERE user_id = $2
   ORDER BY period_date DESC
   LIMIT 1
