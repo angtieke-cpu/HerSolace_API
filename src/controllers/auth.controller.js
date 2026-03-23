@@ -13,6 +13,20 @@ exports.signup = async (req, res) => {
       return res.status(400).json({ message: "Mobile number required" });
     }
 
+    // ✅ STEP 1: Check if already registered in users table
+    const existingUser = await db.query(
+      `SELECT id FROM users WHERE mobile_number = $1`,
+      [mobileNumber]
+    );
+
+    if (existingUser.rows.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "User already exists. Please login.",
+      });
+    }
+
+    // ✅ STEP 2: Continue temp_users logic
     const userResult = await db.query(
       `
       INSERT INTO temp_users (mobile_number)
@@ -33,6 +47,7 @@ exports.signup = async (req, res) => {
       userId = existing.rows[0].id;
     }
 
+    // ✅ STEP 3: Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
@@ -44,7 +59,7 @@ exports.signup = async (req, res) => {
       [userId, otp, expiresAt]
     );
 
-    // ✅ Send OTP via Twilio
+    // ✅ STEP 4: Send OTP
     await sendOtpSms(mobileNumber, otp);
 
     res.json({
@@ -52,6 +67,7 @@ exports.signup = async (req, res) => {
       message: "OTP sent successfully",
       userId,
     });
+
   } catch (error) {
     console.error("Twilio signup OTP error:", error.message);
     res.status(500).json({
