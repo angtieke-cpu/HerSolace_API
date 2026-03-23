@@ -118,7 +118,6 @@ exports.saveJourneyDetails = async (req, res) => {
 
     const user = userResult.rows[0];
 
-
     await client.query("COMMIT");
     const token = generateToken({
       userId: user.id,
