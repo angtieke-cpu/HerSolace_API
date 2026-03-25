@@ -199,32 +199,29 @@ exports.getLinkedProfiles = async (req, res) => {
 
     const result = await db.query(
       `
-  SELECT 
-  u.id,
-  u.name,
-  u.mobile_number,
-  upl.period_date AS last_period_date,
-  upl.bleeding_days,
-  upl.cycle_length
+      SELECT 
+        u.id,
+        u.name,
+        u.mobile_number,
+        upl.period_date AS last_period_date,
+        upl.bleeding_days,
+        upl.cycle_length
 
-FROM user_profile_links uplink
+      FROM user_profile_links uplink
 
-JOIN users u 
-  ON u.id = CASE 
-      WHEN uplink.user_id = $1 THEN uplink.linked_user_id
-      ELSE uplink.user_id
-    END
+      JOIN users u 
+        ON u.id = uplink.user_id
 
-LEFT JOIN user_period_log upl
-  ON upl.user_id = u.id
-  AND upl.period_date = (
-    SELECT MAX(period_date)
-    FROM user_period_log
-    WHERE user_id = u.id
-  )
+      LEFT JOIN user_period_log upl
+        ON upl.user_id = u.id
+        AND upl.period_date = (
+          SELECT MAX(period_date)
+          FROM user_period_log
+          WHERE user_id = u.id
+        )
 
-WHERE $1 IN (uplink.user_id, uplink.linked_user_id);
-  `,
+      WHERE uplink.linked_user_id = $1;
+      `,
       [userId]
     );
 
