@@ -39,6 +39,50 @@ exports.saveJourneyDetails = async (req, res) => {
       });
     }
 
+    // 🔍 STEP 0: Get mobile number from temp_users
+    const tempUserCheck = await client.query(
+      `SELECT mobile_number FROM temp_users WHERE id = $1`,
+      [userId]
+    );
+
+    if (tempUserCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Temp user not found" });
+    }
+
+    const mobileNumber = tempUserCheck.rows[0].mobile_number;
+
+    // 🚨 SPECIAL CASE: TEST NUMBER BYPASS
+    if (mobileNumber === "1111111111") {
+      const existingUser = await client.query(
+        `SELECT id, mobile_number, name FROM users WHERE mobile_number = $1`,
+        [mobileNumber]
+      );
+
+      if (existingUser.rows.length === 0) {
+        return res.status(404).json({
+          message: "Test user not found in users table",
+        });
+      }
+
+      const user = existingUser.rows[0];
+
+      const token = generateToken({
+        userId: user.id,
+        mobileNumber: user.mobile_number,
+      });
+
+      return res.status(200).json({
+        success: true,
+        token,
+        user: {
+          id: user.id,
+          mobileNumber: user.mobile_number,
+          name: user.name,
+        },
+      });
+    }
+
+    // 🟢 NORMAL FLOW STARTS
     await client.query("BEGIN");
 
     // 1️⃣ Move user from temp_users → users
@@ -54,10 +98,7 @@ exports.saveJourneyDetails = async (req, res) => {
 
     // 2️⃣ Remove from temp_users
     await client.query(
-      `
-      DELETE FROM temp_users
-      WHERE id = $1
-      `,
+      `DELETE FROM temp_users WHERE id = $1`,
       [userId]
     );
 
@@ -104,10 +145,11 @@ exports.saveJourneyDetails = async (req, res) => {
       )
       VALUES ($1,$2,$3,$4)
       `,
-      [userId, lastPeriodDate,bleedingDays,cycleLengthDays]
+      [userId, lastPeriodDate, bleedingDays, cycleLengthDays]
     );
 
-     const userResult = await client.query(
+    // 5️⃣ Get user
+    const userResult = await client.query(
       `
       SELECT id, mobile_number, name
       FROM users
@@ -119,6 +161,7 @@ exports.saveJourneyDetails = async (req, res) => {
     const user = userResult.rows[0];
 
     await client.query("COMMIT");
+
     const token = generateToken({
       userId: user.id,
       mobileNumber: user.mobile_number,
@@ -146,6 +189,7 @@ exports.saveJourneyDetails = async (req, res) => {
   } finally {
     client.release();
   }
+};
 };
 
 
