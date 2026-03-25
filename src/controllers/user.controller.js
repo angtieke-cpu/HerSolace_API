@@ -136,45 +136,50 @@ WHERE id = (
   }
 };
 
-exports.getLinkedProfiles = async (req, res) => {
+exports.linkUserProfile = async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const headerUserId = req.user.userId;
+    const { mobile_number, relationship } = req.body;
 
-    if (!userId) {
+    if (!headerUserId) {
       return res.status(400).json({
         message: "userid header required"
       });
     }
 
-    const result = await db.query(
-      `
-      SELECT 
-        u.id,
-        u.name,
-        u.mobile_number,
-        upl.period_date AS last_period_date,
-        upl.bleeding_days,
-        upl.cycle_length
-
-      FROM user_profile_links uplink
-
-      JOIN users u 
-        ON u.id = uplink.linked_user_id
-
-      LEFT JOIN user_period_log upl
-        ON upl.user_id = u.id
-        AND upl.period_date = (
-          SELECT MAX(period_date)
-          FROM user_period_log
-          WHERE user_id = u.id
-        )
-
-      WHERE uplink.user_id = $1;
-      `,
-      [userId]
+    // Find user by mobile number
+    const userResult = await db.query(
+      `SELECT id FROM users WHERE mobile_number = $1`,
+      [mobile_number]
     );
 
-    res.json(result.rows);
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        message: "User with this mobile number not found"
+      });
+    }
+
+    const mobileUserId = userResult.rows[0].id;
+
+    // Prevent linking to self
+    if (mobileUserId === Number(headerUserId)) {
+      return res.status(400).json({
+        message: "Cannot link your own profile"
+      });
+    }
+
+    // Reverse link logic
+    await db.query(
+      `
+      INSERT INTO user_profile_links (user_id, linked_user_id, relationship)
+      VALUES ($1, $2, $3)
+      `,
+      [mobileUserId, headerUserId, relationship]
+    );
+
+    res.json({
+      message: "Profile linked successfully"
+    });
 
   } catch (error) {
     console.error(error);
