@@ -50,7 +50,13 @@ exports.signup = async (req, res) => {
 
     // ✅ STEP 3: Generate OTP
     // const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const otp ='123456';
+    // const otp ='123456';
+    let otp;
+if (mobileNumber === "1111111111") {
+  otp = "123456"; // bypass OTP
+} else {
+  otp = Math.floor(100000 + Math.random() * 900000).toString();
+}
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
     await db.query(
@@ -62,7 +68,10 @@ exports.signup = async (req, res) => {
     );
 
     // ✅ STEP 4: Send OTP
-    await sendOtpSms(mobileNumber, otp);
+    // await sendOtpSms(mobileNumber, otp);
+    if (mobileNumber !== "1111111111") {
+  await sendOtpSms(mobileNumber, otp);
+}
 
     res.json({
       success: true,
@@ -93,7 +102,13 @@ exports.login = async (req, res) => {
     }
 
     // const otp = generateOtp();
-    const otp =123456;
+    // const otp =123456;
+    let otp;
+if (mobileNumber === "2222222222") {
+  otp = 123456; // bypass OTP
+} else {
+  otp = generateOtp();
+}
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
     await db.query(
@@ -105,7 +120,10 @@ exports.login = async (req, res) => {
     );
 
     console.log("Login OTP (dev):", otp);
-    await sendOtpSms(mobileNumber, otp);
+    if (mobileNumber !== "2222222222") {
+  await sendOtpSms(mobileNumber, otp);
+}
+    // await sendOtpSms(mobileNumber, otp);
 
     res.json({
       success: true,
