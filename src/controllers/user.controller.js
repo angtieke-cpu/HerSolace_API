@@ -220,7 +220,7 @@ LEFT JOIN user_period_log upl
     WHERE user_id = u.id
   )
 
-WHERE uplink.linked_user_id = $1;
+WHERE uplink.user_id = $1;
   `,
       [userId]
     );
