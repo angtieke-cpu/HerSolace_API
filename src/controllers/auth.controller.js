@@ -93,7 +93,7 @@ exports.login = async (req, res) => {
     // const otp = generateOtp();
     // const otp =123456;
     let otp;
-    if (mobileNumber === '2222222222') {
+    if (mobileNumber === 2222222222) {
       otp = 123456; // bypass OTP
     } else {
       otp = generateOtp();
@@ -109,7 +109,7 @@ exports.login = async (req, res) => {
     );
 
     console.log('Login OTP (dev):', otp);
-    if (mobileNumber !== '2222222222') {
+    if (mobileNumber !== 2222222222) {
       await sendOtpSms(mobileNumber, otp);
     }
     // await sendOtpSms(mobileNumber, otp);
