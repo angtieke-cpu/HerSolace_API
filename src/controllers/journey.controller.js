@@ -190,6 +190,5 @@ exports.saveJourneyDetails = async (req, res) => {
     client.release();
   }
 };
-};
 
 
