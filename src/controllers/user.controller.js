@@ -136,50 +136,45 @@ WHERE id = (
   }
 };
 
-exports.linkUserProfile = async (req, res) => {
+exports.getLinkedProfiles = async (req, res) => {
   try {
-    const headerUserId = req.user.userId;
-    const { mobile_number, relationship } = req.body;
+    const userId = req.user.userId;
 
-    if (!headerUserId) {
+    if (!userId) {
       return res.status(400).json({
         message: "userid header required"
       });
     }
 
-    // Find user by mobile number
-    const userResult = await db.query(
-      `SELECT id FROM users WHERE mobile_number = $1`,
-      [mobile_number]
-    );
-
-    if (userResult.rows.length === 0) {
-      return res.status(404).json({
-        message: "User with this mobile number not found"
-      });
-    }
-
-    const mobileUserId = userResult.rows[0].id;
-
-    // Prevent linking to self
-    if (mobileUserId === Number(headerUserId)) {
-      return res.status(400).json({
-        message: "Cannot link your own profile"
-      });
-    }
-
-    // Reverse link logic
-    await db.query(
+    const result = await db.query(
       `
-      INSERT INTO user_profile_links (user_id, linked_user_id, relationship)
-      VALUES ($1, $2, $3)
+      SELECT 
+        u.id,
+        u.name,
+        u.mobile_number,
+        upl.period_date AS last_period_date,
+        upl.bleeding_days,
+        upl.cycle_length
+
+      FROM user_profile_links uplink
+
+      JOIN users u 
+        ON u.id = uplink.linked_user_id
+
+      LEFT JOIN user_period_log upl
+        ON upl.user_id = u.id
+        AND upl.period_date = (
+          SELECT MAX(period_date)
+          FROM user_period_log
+          WHERE user_id = u.id
+        )
+
+      WHERE uplink.user_id = $1;
       `,
-      [mobileUserId, headerUserId, relationship]
+      [userId]
     );
 
-    res.json({
-      message: "Profile linked successfully"
-    });
+    res.json(result.rows);
 
   } catch (error) {
     console.error(error);
