@@ -210,7 +210,10 @@ exports.getLinkedProfiles = async (req, res) => {
 FROM user_profile_links uplink
 
 JOIN users u 
-  ON u.id = uplink.user_id
+  ON u.id = CASE 
+      WHEN uplink.user_id = $1 THEN uplink.linked_user_id
+      ELSE uplink.user_id
+    END
 
 LEFT JOIN user_period_log upl
   ON upl.user_id = u.id
@@ -220,7 +223,7 @@ LEFT JOIN user_period_log upl
     WHERE user_id = u.id
   )
 
-WHERE uplink.linked_user_id = $1;
+WHERE $1 IN (uplink.user_id, uplink.linked_user_id);
   `,
       [userId]
     );
