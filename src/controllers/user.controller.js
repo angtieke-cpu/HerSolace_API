@@ -210,7 +210,7 @@ exports.getLinkedProfiles = async (req, res) => {
       FROM user_profile_links uplink
 
       JOIN users u 
-        ON u.id = uplink.user_id
+        ON u.id = uplink.linked_user_id
 
       LEFT JOIN user_period_log upl
         ON upl.user_id = u.id
@@ -220,7 +220,7 @@ exports.getLinkedProfiles = async (req, res) => {
           WHERE user_id = u.id
         )
 
-      WHERE uplink.linked_user_id = $1;
+      WHERE uplink.user_id = $1;
       `,
       [userId]
     );
