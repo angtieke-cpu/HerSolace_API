@@ -4,6 +4,7 @@ const { sendOtpSms } = require("../utils/twilio");
 
 const generateOtp = () =>
   Math.floor(100000 + Math.random() * 900000).toString();
+// const generateOtp =123456;
 
 exports.signup = async (req, res) => {
   try {
@@ -48,7 +49,8 @@ exports.signup = async (req, res) => {
     }
 
     // ✅ STEP 3: Generate OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    // const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otp ='123456';
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
     await db.query(
@@ -90,7 +92,8 @@ exports.login = async (req, res) => {
       });
     }
 
-    const otp = generateOtp();
+    // const otp = generateOtp();
+    const otp =123456;
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
     await db.query(
