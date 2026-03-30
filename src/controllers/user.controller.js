@@ -276,3 +276,43 @@ WHERE u.mobile_number = $1;
     res.status(500).json({ message: "Server error" });
   }
 };
+
+exports.getSharedUsers = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    if (!userId) {
+      return res.status(400).json({
+        message: "userid header required",
+      });
+    }
+
+    const result = await db.query(
+      `
+      SELECT 
+        u.id AS linked_user_id,
+        u.name,
+        u.mobile_number
+
+      FROM user_profile_links uplink
+
+      JOIN users u 
+        ON u.id = uplink.linked_user_id
+
+      WHERE uplink.user_id = $1
+      `,
+      [userId]
+    );
+
+    res.json({
+      success: true,
+      data: result.rows,
+    });
+
+  } catch (error) {
+    console.error("Get shared users error:", error);
+    res.status(500).json({
+      message: "Server error",
+    });
+  }
+};
