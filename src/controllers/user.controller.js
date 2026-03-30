@@ -277,7 +277,7 @@ WHERE u.mobile_number = $1;
   }
 };
 
-exports.getSharedUsers = async (req, res) => {
+exports.getTaggedLinkedUsers = async (req, res) => {
   try {
     const userId = req.user.userId;
 
@@ -290,27 +290,17 @@ exports.getSharedUsers = async (req, res) => {
     const result = await db.query(
       `
       SELECT 
-        u.id AS linked_user_id,
-        u.name,
-        u.mobile_number
-
-      FROM user_profile_links uplink
-
-      JOIN users u 
-        ON u.id = uplink.linked_user_id
-
-      WHERE uplink.user_id = $1
+        linked_user_id
+      FROM user_profile_links
+      WHERE user_id = $1
       `,
       [userId]
     );
 
-    res.json({
-      success: true,
-      data: result.rows,
-    });
+    res.json(result.rows);
 
   } catch (error) {
-    console.error("Get shared users error:", error);
+    console.error("Get tagged users error:", error);
     res.status(500).json({
       message: "Server error",
     });
