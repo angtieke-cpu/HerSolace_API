@@ -457,3 +457,73 @@ exports.getUserPeriodLogs = async (req, res) => {
     });
   }
 };
+
+exports.updateLatestCycleDetails = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { bleedingDays, periodDate } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        message: "userId required",
+      });
+    }
+
+    // ❌ Nothing to update
+    if (!bleedingDays && !periodDate) {
+      return res.status(400).json({
+        message: "At least one field (bleedingDays or periodDate) is required",
+      });
+    }
+
+    // ✅ Build dynamic query
+    let fields = [];
+    let values = [];
+    let index = 1;
+
+    if (bleedingDays !== undefined) {
+      fields.push(`bleeding_days = $${index++}`);
+      values.push(bleedingDays);
+    }
+
+    if (periodDate !== undefined) {
+      fields.push(`period_date = $${index++}`);
+      values.push(periodDate);
+    }
+
+    // add userId for WHERE
+    values.push(userId);
+
+    const query = `
+      UPDATE user_period_log
+      SET ${fields.join(", ")}
+      WHERE id = (
+        SELECT id FROM user_period_log
+        WHERE user_id = $${index}
+        ORDER BY period_date DESC
+        LIMIT 1
+      )
+      RETURNING *
+    `;
+
+    const result = await db.query(query, values);
+
+    if (!result.rows.length) {
+      return res.status(404).json({
+        message: "No record found to update",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Updated successfully",
+      data: result.rows[0],
+    });
+
+  } catch (error) {
+    console.error("Update cycle error:", error);
+    res.status(500).json({
+      message: "Failed to update",
+    });
+  }
+};
