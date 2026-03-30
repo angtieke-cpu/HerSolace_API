@@ -13,7 +13,7 @@ const { updateLatestCycleDetails } = require("../controllers/cycle.controller");
 router.get("/prediction",authenticate, getCyclePrediction);
 router.get("/cycle-details", authenticate, getPreviousCycleDetails);
 router.post("/period-date", authenticate, logLatestPeriod);
-router.put("/last-period", authenticate, logLatestPeriod);
+router.put("/last-period", authenticate, updateLatestCycleDetails);
 router.get("/cycle-hormones", authenticate, getCycleHormoneData);
 router.post("/daily-log", authenticate, createDailyLog);
 router.get("/daily-log", authenticate, getTodayLog);
