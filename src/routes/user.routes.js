@@ -6,7 +6,7 @@ const { updateUserProfile } = require("../controllers/user.controller");
 const { linkUserProfile } = require("../controllers/user.controller");
 const { getLinkedProfiles } = require("../controllers/user.controller");
 const { getUserBymobile } = require("../controllers/user.controller");
-const { getSharedUsers } = require("../controllers/user.controller");
+const { getTaggedLinkedUsers } = require("../controllers/user.controller");
 
 
 router.post("/user-details", authenticate, updateUserProfile);
