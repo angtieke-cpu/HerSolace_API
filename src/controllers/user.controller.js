@@ -317,13 +317,57 @@ exports.getTaggedLinkedUsers = async (req, res) => {
       };
     });
 
-    res.json({
-      success: true,
-      data,
-    });
+    res.json(data);
 
   } catch (error) {
     console.error("Get tagged users error:", error);
+    res.status(500).json({
+      message: "Server error",
+    });
+  }
+};
+
+exports.deleteLinkedUser = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { linkedUserId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        message: "userid required",
+      });
+    }
+
+    if (!linkedUserId) {
+      return res.status(400).json({
+        message: "linkedUserId required",
+      });
+    }
+
+    const result = await db.query(
+      `
+      DELETE FROM user_profile_links
+      WHERE user_id = $1
+      AND linked_user_id = $2
+      RETURNING *
+      `,
+      [userId, linkedUserId]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({
+        message: "Link not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "User unlinked successfully",
+      data: result.rows[0],
+    });
+
+  } catch (error) {
+    console.error("Delete link error:", error);
     res.status(500).json({
       message: "Server error",
     });
