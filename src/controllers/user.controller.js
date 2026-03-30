@@ -290,14 +290,37 @@ exports.getTaggedLinkedUsers = async (req, res) => {
     const result = await db.query(
       `
       SELECT 
-        linked_user_id
-      FROM user_profile_links
-      WHERE user_id = $1
+        u.id AS linked_user_id,
+        u.name,
+        u.mobile_number
+      FROM user_profile_links upl
+      JOIN users u 
+        ON u.id = upl.linked_user_id
+      WHERE upl.user_id = $1
       `,
       [userId]
     );
 
-    res.json(result.rows);
+    // ✅ Mask mobile numbers
+    const data = result.rows.map((user) => {
+      const mobile = user.mobile_number || "";
+
+      const maskedMobile =
+        mobile.length >= 10
+          ? mobile.slice(0, 3) + "****" + mobile.slice(-3)
+          : "****";
+
+      return {
+        linked_user_id: user.linked_user_id,
+        name: user.name,
+        mobile_number: maskedMobile,
+      };
+    });
+
+    res.json({
+      success: true,
+      data,
+    });
 
   } catch (error) {
     console.error("Get tagged users error:", error);
