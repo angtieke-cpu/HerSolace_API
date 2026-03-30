@@ -290,13 +290,13 @@ exports.getTaggedLinkedUsers = async (req, res) => {
     const result = await db.query(
       `
       SELECT 
-        u.id AS linked_user_id,
+        u.id AS user_id,
         u.name,
         u.mobile_number
       FROM user_profile_links upl
       JOIN users u 
-        ON u.id = upl.linked_user_id
-      WHERE upl.user_id = $1
+        ON u.id = upl.user_id
+      WHERE upl.linked_user_id = $1
       `,
       [userId]
     );
@@ -311,13 +311,16 @@ exports.getTaggedLinkedUsers = async (req, res) => {
           : "****";
 
       return {
-        linked_user_id: user.linked_user_id,
+        user_id: user.user_id,
         name: user.name,
         mobile_number: maskedMobile,
       };
     });
 
-    res.json(data);
+    res.json({
+      success: true,
+      data,
+    });
 
   } catch (error) {
     console.error("Get tagged users error:", error);
