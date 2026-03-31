@@ -317,7 +317,7 @@ exports.getTaggedLinkedUsers = async (req, res) => {
       };
     });
 
-    res.json(result.rows);
+    res.json(data);
 
   } catch (error) {
     console.error("Get tagged users error:", error);
