@@ -307,7 +307,7 @@ exports.getTaggedLinkedUsers = async (req, res) => {
 
       const maskedMobile =
         mobile.length >= 10
-          ? mobile.slice(0, 3) + "****" + mobile.slice(-3)
+          ? mobile.slice(0, 2) + "*****" + mobile.slice(-2)
           : "****";
 
       return {
