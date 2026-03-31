@@ -375,7 +375,7 @@ exports.deleteLinkedUser = async (req, res) => {
     });
   }
 };
-exports.updateUserProfile = async (req, res) => {
+exports.updateUserSettings = async (req, res) => {
   try {
     const userId = req.user.userId;
 
