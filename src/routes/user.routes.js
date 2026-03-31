@@ -16,6 +16,7 @@ router.post("/link-user", authenticate, linkUserProfile);
 router.get("/linked-users", authenticate, getLinkedProfiles);
 router.post("/available-users", authenticate, getUserBymobile);
 router.get("/shared-users", authenticate, getTaggedLinkedUsers);
-router.post("/unlink-user", authenticate, updateUserSettings);
+router.post("/unlink-user", authenticate, deleteLinkedUser);
+router.post("/user-settings", authenticate, updateUserSettings);
 
 module.exports = router;
