@@ -351,7 +351,7 @@ exports.deleteLinkedUser = async (req, res) => {
       AND linked_user_id = $2
       RETURNING *
       `,
-      [userId, linkedUserId]
+      [linkedUserId,userId]
     );
 
     if (!result.rows.length) {
