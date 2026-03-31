@@ -375,3 +375,47 @@ exports.deleteLinkedUser = async (req, res) => {
     });
   }
 };
+exports.updateUserProfile = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    if (!userId) {
+      return res.status(400).json({
+        message: "userid header required"
+      });
+    }
+
+    const {
+      anonymous_mode,
+      notification_mode
+    } = req.body;
+
+    await db.query(
+      `
+      UPDATE users
+      SET
+        anonymous_mode = COALESCE($1, anonymous_mode),
+        notification_mode = COALESCE($2, notification_mode),
+        updated_at = NOW()
+      WHERE id = $3
+      `,
+      [
+        anonymous_mode,
+        notification_mode,
+        userId
+      ]
+    );
+
+    res.json({
+      success: true,
+      message: "Settings updated successfully"
+    });
+
+  } catch (error) {
+    console.error("Update settings error:", error);
+
+    res.status(500).json({
+      message: "Failed to update settings"
+    });
+  }
+};
