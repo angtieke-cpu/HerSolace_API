@@ -24,7 +24,9 @@ exports.getUserProfile = async (req, res) => {
     u.is_verified,
     upl.period_date AS last_period_date,
     upl.bleeding_days,
-    upl.cycle_length AS cycle_length_days
+    upl.cycle_length AS cycle_length_days,
+    u.anonymous_mode,
+    u.notification_mode
 
   FROM users u
 
