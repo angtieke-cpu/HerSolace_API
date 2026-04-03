@@ -486,9 +486,7 @@ exports.updateLatestCycleDetails = async (req, res) => {
     const { periodDate, bleedingDays } = req.body;
 
     if (!userId) {
-      return res.status(400).json({
-        message: "userId required",
-      });
+      return res.status(400).json({ message: "userId required" });
     }
 
     if (!periodDate && bleedingDays === undefined) {
@@ -499,15 +497,30 @@ exports.updateLatestCycleDetails = async (req, res) => {
 
     let cycle_length = null;
 
-    // ✅ Recalculate cycle_length ONLY if periodDate is provided
+    // ✅ Validate periodDate (future handling)
     if (periodDate) {
       const newDate = dayjs(periodDate);
+      const today = dayjs();
 
+      // 🚫 Block far future dates (>7 days ahead)
+      if (newDate.isAfter(today.add(7, "day"))) {
+        return res.status(400).json({
+          message: "Future date too far",
+        });
+      }
+
+      // ✅ Get previous records (EXCLUDING latest one)
       const prevResult = await db.query(
         `
         SELECT period_date
         FROM user_period_log
         WHERE user_id = $1
+        AND id != (
+          SELECT id FROM user_period_log
+          WHERE user_id = $1
+          ORDER BY period_date DESC
+          LIMIT 1
+        )
         ORDER BY period_date DESC
         LIMIT 6
         `,
@@ -519,13 +532,15 @@ exports.updateLatestCycleDetails = async (req, res) => {
       if (rows.length >= 1) {
         let diffs = [];
 
-        const latestDate = dayjs(rows[0].period_date);
-        const newDiff = newDate.diff(latestDate, "day");
+        // ✅ Compare new date with latest valid past record
+        const latestPrev = dayjs(rows[0].period_date);
+        const newDiff = newDate.diff(latestPrev, "day");
 
         if (newDiff > 0) {
           diffs.push(newDiff);
         }
 
+        // ✅ Historical diffs
         for (let i = 0; i < rows.length - 1; i++) {
           const d1 = dayjs(rows[i].period_date);
           const d2 = dayjs(rows[i + 1].period_date);
@@ -541,7 +556,10 @@ exports.updateLatestCycleDetails = async (req, res) => {
           const avg =
             diffs.reduce((a, b) => a + b, 0) / diffs.length;
 
-          cycle_length = Math.round(avg);
+          // 🚫 Prevent unrealistic cycles
+          if (avg >= 15 && avg <= 45) {
+            cycle_length = Math.round(avg);
+          }
         }
       }
     }
@@ -562,6 +580,13 @@ exports.updateLatestCycleDetails = async (req, res) => {
     }
 
     if (bleedingDays !== undefined) {
+      // 🚫 Optional validation
+      if (bleedingDays < 1 || bleedingDays > 10) {
+        return res.status(400).json({
+          message: "Invalid bleeding days",
+        });
+      }
+
       fields.push(`bleeding_days = $${index++}`);
       values.push(bleedingDays);
     }
