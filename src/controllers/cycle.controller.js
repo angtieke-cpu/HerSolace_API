@@ -14,29 +14,51 @@ exports.getCyclePrediction = async (req, res) => {
     }
 
     // 1️⃣ Get base data
-    const result = await db.query(
-      `
+   const result = await db.query(
+  `
+  SELECT 
+    u.name,
+
+    lp.period_date AS last_period_date,
+    lp.bleeding_days,
+
+    stats.cycle_length_days
+
+  FROM users u
+
+  -- 🔹 Latest record
+  LEFT JOIN LATERAL (
+    SELECT period_date, bleeding_days
+    FROM user_period_log
+    WHERE user_id = u.id
+    ORDER BY period_date DESC
+    LIMIT 1
+  ) lp ON TRUE
+
+  -- 🔹 Last 6 records average
+  LEFT JOIN LATERAL (
     SELECT 
-  u.name,
-  lp.period_date AS last_period_date,
-  lp.cycle_length AS cycle_length_days,
-  lp.bleeding_days
+      COALESCE(
+        CASE 
+          WHEN COUNT(*) = 1 THEN MAX(cycle_length)
+          ELSE ROUND(AVG(cycle_length))
+        END,
+        28
+      ) AS cycle_length_days
+    FROM (
+      SELECT cycle_length
+      FROM user_period_log
+      WHERE user_id = u.id
+        AND cycle_length IS NOT NULL
+      ORDER BY period_date DESC
+      LIMIT 6
+    ) t
+  ) stats ON TRUE
 
-FROM users u
-
-LEFT JOIN LATERAL (
-  SELECT period_date, cycle_length, bleeding_days
-  FROM user_period_log
-  WHERE user_id = u.id
-  ORDER BY period_date DESC
-  LIMIT 1
-) lp ON TRUE
-
-WHERE u.id = $1;
-      `,
-      [userId]
-    );
-
+  WHERE u.id = $1;
+  `,
+  [userId]
+);
     if (result.rows.length === 0) {
       return res.status(404).json({
         message: "Journey details not found",
