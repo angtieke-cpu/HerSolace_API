@@ -435,7 +435,7 @@ exports.createUserDeleteRequest = async (req, res) => {
       `
       INSERT INTO user_delete_requests (
         user_id,
-        request_status,
+        request_status
       )
       VALUES ($1, 'PROCESS')
       `,
