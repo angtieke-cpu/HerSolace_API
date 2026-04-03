@@ -445,12 +445,7 @@ exports.createUserDeleteRequest = async (req, res) => {
     // 4️⃣ Response
     res.json({
       success: true,
-      message: "Request created successfully",
-      data: {
-        userId,
-        uniqueId,
-        status: "PROCESS"
-      }
+      message: "Request created successfully"
     });
 
   } catch (error) {
