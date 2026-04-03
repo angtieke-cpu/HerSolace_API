@@ -419,3 +419,45 @@ exports.updateUserSettings = async (req, res) => {
     });
   }
 };
+
+exports.createUserDeleteRequest = async (req, res) => {
+  try {
+   const userId = req.user.userId;
+
+    if (!userId) {
+      return res.status(400).json({
+        message: "userid header required"
+      });
+    }
+
+    // 3️⃣ Insert into DB
+    await db.query(
+      `
+      INSERT INTO user_delete_requests (
+        user_id,
+        request_status,
+      )
+      VALUES ($1, 'PROCESS')
+      `,
+      [userId]
+    );
+
+    // 4️⃣ Response
+    res.json({
+      success: true,
+      message: "Request created successfully",
+      data: {
+        userId,
+        uniqueId,
+        status: "PROCESS"
+      }
+    });
+
+  } catch (error) {
+    console.error("Create request error:", error);
+
+    res.status(500).json({
+      message: "Failed to create request"
+    });
+  }
+};
