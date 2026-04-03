@@ -461,7 +461,7 @@ exports.getUserPeriodLogs = async (req, res) => {
 exports.updateLatestCycleDetails = async (req, res) => {
   try {
     const userId = req.user.userId;
-    const { bleedingDays, periodDate } = req.body;
+    const { periodDate, bleedingDays } = req.body;
 
     if (!userId) {
       return res.status(400).json({
@@ -469,29 +469,81 @@ exports.updateLatestCycleDetails = async (req, res) => {
       });
     }
 
-    // ❌ Nothing to update
-    if (!bleedingDays && !periodDate) {
+    if (!periodDate && bleedingDays === undefined) {
       return res.status(400).json({
-        message: "At least one field (bleedingDays or periodDate) is required",
+        message: "At least one field required",
       });
     }
 
-    // ✅ Build dynamic query
+    let cycle_length = null;
+
+    // ✅ Recalculate cycle_length ONLY if periodDate is provided
+    if (periodDate) {
+      const newDate = dayjs(periodDate);
+
+      const prevResult = await db.query(
+        `
+        SELECT period_date
+        FROM user_period_log
+        WHERE user_id = $1
+        ORDER BY period_date DESC
+        LIMIT 6
+        `,
+        [userId]
+      );
+
+      const rows = prevResult.rows;
+
+      if (rows.length >= 1) {
+        let diffs = [];
+
+        const latestDate = dayjs(rows[0].period_date);
+        const newDiff = newDate.diff(latestDate, "day");
+
+        if (newDiff > 0) {
+          diffs.push(newDiff);
+        }
+
+        for (let i = 0; i < rows.length - 1; i++) {
+          const d1 = dayjs(rows[i].period_date);
+          const d2 = dayjs(rows[i + 1].period_date);
+
+          const diff = d1.diff(d2, "day");
+
+          if (diff > 0) {
+            diffs.push(diff);
+          }
+        }
+
+        if (diffs.length > 0) {
+          const avg =
+            diffs.reduce((a, b) => a + b, 0) / diffs.length;
+
+          cycle_length = Math.round(avg);
+        }
+      }
+    }
+
+    // ✅ Dynamic update
     let fields = [];
     let values = [];
     let index = 1;
+
+    if (periodDate) {
+      fields.push(`period_date = $${index++}`);
+      values.push(periodDate);
+    }
+
+    if (cycle_length !== null) {
+      fields.push(`cycle_length = $${index++}`);
+      values.push(cycle_length);
+    }
 
     if (bleedingDays !== undefined) {
       fields.push(`bleeding_days = $${index++}`);
       values.push(bleedingDays);
     }
 
-    if (periodDate !== undefined) {
-      fields.push(`period_date = $${index++}`);
-      values.push(periodDate);
-    }
-
-    // add userId for WHERE
     values.push(userId);
 
     const query = `
@@ -510,7 +562,7 @@ exports.updateLatestCycleDetails = async (req, res) => {
 
     if (!result.rows.length) {
       return res.status(404).json({
-        message: "No record found to update",
+        message: "No record found",
       });
     }
 
@@ -522,6 +574,7 @@ exports.updateLatestCycleDetails = async (req, res) => {
 
   } catch (error) {
     console.error("Update cycle error:", error);
+
     res.status(500).json({
       message: "Failed to update",
     });
