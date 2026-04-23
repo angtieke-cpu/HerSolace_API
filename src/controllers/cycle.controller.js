@@ -14,69 +14,102 @@ exports.getCyclePrediction = async (req, res) => {
     }
 
     // 1️⃣ Get base data
-   const result = await db.query(
-  `
-  SELECT 
-    u.name,
+    const result = await db.query(
+      `
+      SELECT 
+        u.name,
 
-    lp.period_date AS last_period_date,
-    lp.bleeding_days,
+        lp.period_date AS last_period_date,
+        lp.bleeding_days,
 
-    stats.cycle_length_days
+        stats.cycle_length_days
 
-  FROM users u
+      FROM users u
 
-  -- 🔹 Latest record
-  LEFT JOIN LATERAL (
-    SELECT period_date, bleeding_days
-    FROM user_period_log
-    WHERE user_id = u.id
-    ORDER BY period_date DESC
-    LIMIT 1
-  ) lp ON TRUE
+      -- 🔹 Latest record
+      LEFT JOIN LATERAL (
+        SELECT period_date, bleeding_days
+        FROM user_period_log
+        WHERE user_id = u.id
+        ORDER BY period_date DESC
+        LIMIT 1
+      ) lp ON TRUE
 
-  -- 🔹 Last 6 records average
-  LEFT JOIN LATERAL (
-    SELECT 
-      COALESCE(
-        CASE 
-          WHEN COUNT(*) = 1 THEN MAX(cycle_length)
-          ELSE ROUND(AVG(cycle_length))
-        END,
-        28
-      ) AS cycle_length_days
-    FROM (
-      SELECT cycle_length
-      FROM user_period_log
-      WHERE user_id = u.id
-        AND cycle_length IS NOT NULL
-      ORDER BY period_date DESC
-      LIMIT 6
-    ) t
-  ) stats ON TRUE
+      -- 🔹 Last 6 records average
+      LEFT JOIN LATERAL (
+        SELECT 
+          COALESCE(
+            CASE 
+              WHEN COUNT(*) = 1 THEN MAX(cycle_length)
+              ELSE ROUND(AVG(cycle_length))
+            END,
+            28
+          ) AS cycle_length_days
+        FROM (
+          SELECT cycle_length
+          FROM user_period_log
+          WHERE user_id = u.id
+            AND cycle_length IS NOT NULL
+          ORDER BY period_date DESC
+          LIMIT 6
+        ) t
+      ) stats ON TRUE
 
-  WHERE u.id = $1;
-  `,
-  [userId]
-);
+      WHERE u.id = $1;
+      `,
+      [userId]
+    );
+
     if (result.rows.length === 0) {
       return res.status(404).json({
         message: "Journey details not found",
       });
     }
 
-    const { name, last_period_date, cycle_length_days, bleeding_days } = result.rows[0];
+    const {
+      name,
+      last_period_date,
+      cycle_length_days,
+      bleeding_days,
+    } = result.rows[0];
 
-    // 2️⃣ Calculate cycle
+    if (!last_period_date) {
+      return res.status(400).json({
+        message: "No period data available",
+      });
+    }
+
+    // 2️⃣ Calculate delay-based cycle adjustment
+    const today = new Date();
+    const lastPeriodDate = new Date(last_period_date);
+
+    const diffTime = today - lastPeriodDate;
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+    let adjustedCycleLength = cycle_length_days || 28;
+    let delayDays = 0;
+
+    // 👉 If user missed logging (cycle exceeded)
+    if (diffDays > adjustedCycleLength) {
+      delayDays = diffDays - adjustedCycleLength;
+      adjustedCycleLength = adjustedCycleLength + delayDays;
+    }
+
+    // 👉 Safety cap (avoid unrealistic predictions)
+    if (adjustedCycleLength > 45) {
+      adjustedCycleLength = 45;
+    }
+
+    // 3️⃣ Calculate cycle
     const cycleData = calculateCycle({
-      lastPeriodDate: last_period_date,
-      cycleLength: cycle_length_days,
-      bleedingDays: bleeding_days
+      lastPeriodDate: lastPeriodDate,
+      cycleLength: adjustedCycleLength,
+      bleedingDays: bleeding_days,
     });
 
     const { phase, stage, currentDay } = cycleData;
 
-    // 3️⃣ OLD TABLE (minimal fields)
+    // 4️⃣ OLD TABLE (minimal fields)
     const oldGuide = await db.query(
       `
       SELECT
@@ -91,12 +124,12 @@ exports.getCyclePrediction = async (req, res) => {
       [currentDay]
     );
 
-    // 4️⃣ NEW TABLE (range + stage match)
+    // 5️⃣ NEW TABLE (range + stage match)
     const newGuide = await db.query(
       `
       SELECT *
       FROM cycle_phase_guidelines
-      WHERE phase_name=$1
+      WHERE phase_name = $1
       AND stage = $2
       LIMIT 1
       `,
@@ -108,14 +141,16 @@ exports.getCyclePrediction = async (req, res) => {
       ...(newGuide.rows[0] || {}),
     };
 
-    // 5️⃣ Response
+    // 6️⃣ Response
     res.json({
       success: true,
       data: {
         username: name,
         ...cycleData,
-        cycleGuide
-      }
+        delayDays,
+        adjustedCycleLength,
+        cycleGuide,
+      },
     });
 
   } catch (error) {
@@ -125,7 +160,6 @@ exports.getCyclePrediction = async (req, res) => {
     });
   }
 };
-
 exports.getPreviousCycleDetails = async (req, res) => {
   try {
     const userId = req.user.userId;
