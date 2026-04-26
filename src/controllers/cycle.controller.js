@@ -172,36 +172,73 @@ exports.getPreviousCycleDetails = async (req, res) => {
 
     const result = await db.query(
       `
-  SELECT 
-    period_date AS last_period_date,
-    cycle_length AS cycle_length_days,
-    bleeding_days
-  FROM user_period_log
-  WHERE user_id = $1
-  ORDER BY period_date DESC
-  LIMIT 1
-  `,
+      SELECT 
+        period_date AS last_period_date,
+        cycle_length AS cycle_length_days,
+        bleeding_days
+      FROM user_period_log
+      WHERE user_id = $1
+      ORDER BY period_date DESC
+      LIMIT 1
+      `,
       [userId]
     );
 
-    const { last_period_date, cycle_length_days, bleeding_days } = result.rows[0];
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        message: "No cycle data found",
+      });
+    }
 
-    // 4️⃣ Response
+    const {
+      last_period_date,
+      cycle_length_days,
+      bleeding_days,
+    } = result.rows[0];
+
+    if (!last_period_date) {
+      return res.status(400).json({
+        message: "Invalid period data",
+      });
+    }
+
+    // 🔧 Apply delay logic
+    const today = new Date();
+    const lastPeriodDate = new Date(last_period_date);
+
+    const diffTime = today - lastPeriodDate;
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+    let adjustedCycleLength = cycle_length_days || 28;
+    let delayDays = 0;
+
+    // 👉 Extend cycle if delayed
+    if (diffDays > adjustedCycleLength) {
+      delayDays = diffDays - adjustedCycleLength;
+      adjustedCycleLength = adjustedCycleLength + delayDays;
+    }
+
+    // 👉 Safety cap
+    if (adjustedCycleLength > 45) {
+      adjustedCycleLength = 45;
+    }
+
+    // ✅ Response
     res.json({
       success: true,
       lastPeriodDate: last_period_date,
-      cycleLength: cycle_length_days,
-      bleedingDays: bleeding_days
+      cycleLength: adjustedCycleLength,
+      bleedingDays: bleeding_days,
+      delayDays,
     });
 
   } catch (error) {
-    console.error("Cycle prediction error:", error);
+    console.error("Cycle fetch error:", error);
     res.status(500).json({
       message: "Failed to fetch result",
     });
   }
 };
-
 exports.getCycleHormoneData = async (req, res) => {
   try {
     const userId = req.user.userId;
