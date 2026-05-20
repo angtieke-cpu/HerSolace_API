@@ -95,10 +95,6 @@ exports.getCyclePrediction = async (req, res) => {
       adjustedCycleLength = adjustedCycleLength + delayDays;
     }
 
-    // 👉 Safety cap (avoid unrealistic predictions)
-    if (adjustedCycleLength > 45) {
-      adjustedCycleLength = 45;
-    }
 
     // 3️⃣ Calculate cycle
     const cycleData = calculateCycle({
