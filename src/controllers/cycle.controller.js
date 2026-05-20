@@ -227,7 +227,9 @@ exports.getPreviousCycleDetails = async (req, res) => {
     const lastPeriodDate = new Date(last_period_date);
 
     const diffTime = today - lastPeriodDate;
-    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  const diffDays =
+  Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+
 
     let adjustedCycleLength = cycle_length_days || 28;
     let delayDays = 0;
