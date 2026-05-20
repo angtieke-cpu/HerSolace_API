@@ -61,37 +61,43 @@ WHERE u.id = $1;
     }
 
     // 2️⃣ Calculate delay-based cycle adjustment
-   const diffDays =
+
+const today = new Date(
+  new Date().toLocaleString("en-US", {
+    timeZone: "Asia/Kolkata",
+  })
+);
+
+const lastPeriodDate = new Date(
+  new Date(last_period_date).toLocaleString("en-US", {
+    timeZone: "Asia/Kolkata",
+  })
+);
+
+// Normalize both dates
+today.setHours(0, 0, 0, 0);
+lastPeriodDate.setHours(0, 0, 0, 0);
+
+// Difference
+const diffTime =
+  today.getTime() - lastPeriodDate.getTime();
+
+const diffDays =
   Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
 
+let adjustedCycleLength =
+  Number(cycle_length_days) || 28;
 
-    const lastPeriodDate = new Date(last_period_date);
+let delayDays = 0;
 
+// 👉 If user missed logging
+if (diffDays > adjustedCycleLength) {
+  delayDays =
+    diffDays - adjustedCycleLength;
 
-    const diffTime = today - lastPeriodDate;
-    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-
-
-
-
-
-
-
-
-
-
-    let adjustedCycleLength = cycle_length_days || 28;
-    let delayDays = 0;
-
-    // 👉 If user missed logging (cycle exceeded)
-    if (diffDays > adjustedCycleLength) {
-      delayDays = diffDays - adjustedCycleLength;
-      adjustedCycleLength = adjustedCycleLength + delayDays;
-
-
-    }
-
-
+  adjustedCycleLength =
+    adjustedCycleLength + delayDays;
+}
     // 3️⃣ Calculate cycle
 
     const cycleData = calculateCycle({
