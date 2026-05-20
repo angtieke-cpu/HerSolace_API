@@ -17,57 +17,26 @@ exports.getCyclePrediction = async (req, res) => {
     const result = await db.query(
       `
       SELECT 
-        u.name,
+  u.name,
 
-        lp.period_date AS last_period_date,
-        lp.bleeding_days,
+  lp.period_date AS last_period_date,
+  lp.bleeding_days,
+  lp.cycle_length AS cycle_length_days
 
-        stats.cycle_length_days
+FROM users u
 
-      FROM users u
-
-      -- 🔹 Latest record
-      LEFT JOIN LATERAL (
-        SELECT period_date, bleeding_days
-
-
-        FROM user_period_log
-        WHERE user_id = u.id
-        ORDER BY period_date DESC
-        LIMIT 1
-      ) lp ON TRUE
-
-      -- 🔹 Last 6 records average
-  LEFT JOIN LATERAL (
+LEFT JOIN LATERAL (
   SELECT 
-    GREATEST(
-      COALESCE(ROUND(AVG(cycle_length)), 28),
-      COALESCE(MAX(cycle_length), 28)
-    ) AS cycle_length_days
-  FROM (
-    SELECT cycle_length
-    FROM user_period_log
-    WHERE user_id = u.id
-      AND cycle_length IS NOT NULL
-    ORDER BY period_date DESC
-    LIMIT 6
-  ) t
-) stats ON TRUE
+    period_date,
+    bleeding_days,
+    cycle_length
+  FROM user_period_log
+  WHERE user_id = u.id
+  ORDER BY period_date DESC
+  LIMIT 1
+) lp ON TRUE
 
-      WHERE u.id = $1;
-
-
-
-
-
-
-
-
-
-
-
-
-
+WHERE u.id = $1;
       `,
       [userId]
     );
