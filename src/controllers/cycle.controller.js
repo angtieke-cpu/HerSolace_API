@@ -540,7 +540,6 @@ exports.getUserPeriodLogs = async (req, res) => {
       });
     }
 
-    // ✅ Get all logs
     const result = await db.query(
       `
       SELECT 
@@ -558,78 +557,53 @@ exports.getUserPeriodLogs = async (req, res) => {
 
     const logs = result.rows;
 
-    // ✅ No logs
-    if (!logs.length) {
-      return res.json({
-        success: true,
-        count: 0,
-        data: []
-      });
-    }
+    // ✅ Apply delay logic only for latest log
+    if (logs.length > 0) {
+      const latestLog = logs[0];
 
-    // ✅ Latest record
-    const latestLog = logs[0];
-
-    // ✅ Indian timezone today
-    const today = new Date(
-      new Date().toLocaleString("en-US", {
-        timeZone: "Asia/Kolkata",
-      })
-    );
-
-    today.setHours(0, 0, 0, 0);
-
-    // ✅ Latest period date
-    const lastPeriodDate = new Date(
-      new Date(latestLog.period_date).toLocaleString(
-        "en-US",
-        {
+      const today = new Date(
+        new Date().toLocaleString("en-US", {
           timeZone: "Asia/Kolkata",
-        }
-      )
-    );
+        })
+      );
 
-    lastPeriodDate.setHours(0, 0, 0, 0);
+      today.setHours(0, 0, 0, 0);
 
-    // ✅ Days passed
-    const diffTime =
-      today.getTime() - lastPeriodDate.getTime();
+      const lastPeriodDate = new Date(
+        new Date(latestLog.period_date).toLocaleString(
+          "en-US",
+          {
+            timeZone: "Asia/Kolkata",
+          }
+        )
+      );
 
-    const diffDays =
-      Math.floor(
-        diffTime / (1000 * 60 * 60 * 24)
-      ) + 1;
+      lastPeriodDate.setHours(0, 0, 0, 0);
 
-    // ✅ Apply delay logic ONLY to latest record
-    let adjustedCycleLength =
-      Number(latestLog.cycle_length) || 28;
+      const diffTime =
+        today.getTime() -
+        lastPeriodDate.getTime();
 
-    let delayDays = 0;
+      const diffDays =
+        Math.floor(
+          diffTime / (1000 * 60 * 60 * 24)
+        ) + 1;
 
-    if (diffDays > adjustedCycleLength) {
-      delayDays =
-        diffDays - adjustedCycleLength;
+      let adjustedCycleLength =
+        Number(latestLog.cycle_length) || 28;
 
-      adjustedCycleLength =
-        adjustedCycleLength + delayDays;
+      // ✅ Extend cycle if delayed
+      if (diffDays > adjustedCycleLength) {
+        adjustedCycleLength =
+          adjustedCycleLength +
+          (diffDays - adjustedCycleLength);
+
+        // ✅ Replace existing field
+        logs[0].cycle_length =
+          adjustedCycleLength;
+      }
     }
 
-    // ✅ Replace latest record values
-    logs[0] = {
-      ...latestLog,
-
-      original_cycle_length:
-        latestLog.cycle_length,
-
-      adjusted_cycle_length:
-        adjustedCycleLength,
-
-      delay_days: delayDays,
-
-      current_cycle_day: diffDays
-    };
-
-    // ✅ Response
     return res.json({
       success: true,
       count: logs.length,
