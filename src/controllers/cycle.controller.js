@@ -540,6 +540,7 @@ exports.getUserPeriodLogs = async (req, res) => {
       });
     }
 
+    // ✅ Get all logs
     const result = await db.query(
       `
       SELECT 
@@ -555,16 +556,90 @@ exports.getUserPeriodLogs = async (req, res) => {
       [userId]
     );
 
-    res.json({
+    const logs = result.rows;
+
+    // ✅ No logs
+    if (!logs.length) {
+      return res.json({
+        success: true,
+        count: 0,
+        data: []
+      });
+    }
+
+    // ✅ Latest record
+    const latestLog = logs[0];
+
+    // ✅ Indian timezone today
+    const today = new Date(
+      new Date().toLocaleString("en-US", {
+        timeZone: "Asia/Kolkata",
+      })
+    );
+
+    today.setHours(0, 0, 0, 0);
+
+    // ✅ Latest period date
+    const lastPeriodDate = new Date(
+      new Date(latestLog.period_date).toLocaleString(
+        "en-US",
+        {
+          timeZone: "Asia/Kolkata",
+        }
+      )
+    );
+
+    lastPeriodDate.setHours(0, 0, 0, 0);
+
+    // ✅ Days passed
+    const diffTime =
+      today.getTime() - lastPeriodDate.getTime();
+
+    const diffDays =
+      Math.floor(
+        diffTime / (1000 * 60 * 60 * 24)
+      ) + 1;
+
+    // ✅ Apply delay logic ONLY to latest record
+    let adjustedCycleLength =
+      Number(latestLog.cycle_length) || 28;
+
+    let delayDays = 0;
+
+    if (diffDays > adjustedCycleLength) {
+      delayDays =
+        diffDays - adjustedCycleLength;
+
+      adjustedCycleLength =
+        adjustedCycleLength + delayDays;
+    }
+
+    // ✅ Replace latest record values
+    logs[0] = {
+      ...latestLog,
+
+      original_cycle_length:
+        latestLog.cycle_length,
+
+      adjusted_cycle_length:
+        adjustedCycleLength,
+
+      delay_days: delayDays,
+
+      current_cycle_day: diffDays
+    };
+
+    // ✅ Response
+    return res.json({
       success: true,
-      count: result.rows.length,
-      data: result.rows
+      count: logs.length,
+      data: logs
     });
 
   } catch (error) {
     console.error("Get logs error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       message: "Failed to fetch period logs"
     });
   }
