@@ -251,51 +251,99 @@ exports.getAiCycleInsightsWithInput = async (req, res) => {
       bleeding_days
     } = result.rows[0];
 
-    // ✅ Calculate cycle day
-    const today = dayjs();
-    const startDate = dayjs(last_period_date);
+    // ✅ Indian timezone
+    const today = dayjs().tz("Asia/Kolkata");
 
-    const diffDays = today.diff(startDate, "day");
-    const currentDay = (diffDays % cycle_length_days) + 1;
+    const startDate = dayjs(last_period_date)
+      .tz("Asia/Kolkata");
+
+    // ✅ Actual elapsed days
+    const diffDays =
+      today.diff(startDate, "day") + 1;
+
+    // ✅ Delay logic
+    let adjustedCycleLength =
+      Number(cycle_length_days) || 28;
+
+    let delayDays = 0;
+
+    if (diffDays > adjustedCycleLength) {
+      delayDays =
+        diffDays - adjustedCycleLength;
+
+      adjustedCycleLength =
+        adjustedCycleLength + delayDays;
+    }
+
+    // ✅ Current cycle day
+    const currentDay =
+      ((diffDays - 1) % adjustedCycleLength) + 1;
 
     // ✅ Phase logic
     let phase = "";
-    if (currentDay <= bleeding_days) phase = "Menstrual";
-    else if (currentDay <= 13) phase = "Follicular";
-    else if (currentDay === 14) phase = "Ovulation";
-    else phase = "Luteal";
+
+    if (currentDay <= bleeding_days) {
+      phase = "Menstrual";
+    } else if (currentDay <= 13) {
+      phase = "Follicular";
+    } else if (currentDay === 14) {
+      phase = "Ovulation";
+    } else {
+      phase = "Luteal";
+    }
 
     // ✅ Prompt
     const prompt = `
 User cycle context:
-Day ${currentDay} (${phase} phase), cycle length ${cycle_length_days} days, bleeding ${bleeding_days} days.
+
+- Current cycle day: ${currentDay}
+- Current phase: ${phase}
+- Cycle length: ${adjustedCycleLength} days
+- Bleeding duration: ${bleeding_days} days
+- Delay days: ${delayDays}
 
 User query:
 "${userInput}"
 
-Give a short, helpful answer (2–4 lines max).
-No JSON. Plain text only.
+Instructions:
+- Give supportive wellness guidance
+- Keep answer concise
+- 2–4 lines maximum
+- Plain text only
+- No JSON
 `;
 
     // ✅ AI Call
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.7
-    });
+    const response =
+      await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "user",
+            content: prompt
+          }
+        ],
+        temperature: 0.7
+      });
 
-    const answer = response.choices[0].message.content.trim();
+    const answer =
+      response.choices[0].message.content.trim();
 
-    // ✅ Final response (NO DB SAVE)
-    res.json({
+    // ✅ Final response
+    return res.json({
       success: true,
       cycleDay: currentDay,
       phase,
+      delayDays,
+      adjustedCycleLength,
       answer
     });
 
   } catch (error) {
     console.error("AI error:", error);
-    res.status(500).json({ message: "AI response failed" });
+
+    return res.status(500).json({
+      message: "AI response failed"
+    });
   }
 };
