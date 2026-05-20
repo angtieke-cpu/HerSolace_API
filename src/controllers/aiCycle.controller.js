@@ -18,7 +18,7 @@ exports.getAiCycleInsights = async (req, res) => {
       });
     }
 
-    // ✅ 1. Get latest data from user_period_log
+    // ✅ 1. Get latest cycle data
     const result = await db.query(
       `
       SELECT 
@@ -45,18 +45,45 @@ exports.getAiCycleInsights = async (req, res) => {
       bleeding_days
     } = result.rows[0];
 
-    // ✅ 2. Calculate current cycle day
-    const today = dayjs();
-    const startDate = dayjs(last_period_date);
+    // ✅ 2. Indian timezone date logic
+    const today = dayjs().tz("Asia/Kolkata");
 
-    const diffDays = today.diff(startDate, "day");
-    const currentDay = (diffDays % cycle_length_days) + 1;
+    const startDate = dayjs(last_period_date)
+      .tz("Asia/Kolkata");
+
+    // ✅ Actual elapsed days
+    const diffDays = today.diff(startDate, "day") + 1;
+
+    // ✅ Delay logic
+    let adjustedCycleLength =
+      Number(cycle_length_days) || 28;
+
+    let delayDays = 0;
+
+    if (diffDays > adjustedCycleLength) {
+      delayDays =
+        diffDays - adjustedCycleLength;
+
+      adjustedCycleLength =
+        adjustedCycleLength + delayDays;
+    }
+
+    // ✅ Current cycle day
+    const currentDay =
+      ((diffDays - 1) % adjustedCycleLength) + 1;
+
+    // ✅ Determine phase
     let phase = "";
 
-    if (currentDay <= bleeding_days) phase = "Menstrual";
-    else if (currentDay <= 13) phase = "Follicular";
-    else if (currentDay === 14) phase = "Ovulation";
-    else phase = "Luteal";
+    if (currentDay <= bleeding_days) {
+      phase = "Menstrual";
+    } else if (currentDay <= 13) {
+      phase = "Follicular";
+    } else if (currentDay === 14) {
+      phase = "Ovulation";
+    } else {
+      phase = "Luteal";
+    }
 
     // ✅ 3. Check cache
     const cache = await db.query(
@@ -65,30 +92,41 @@ exports.getAiCycleInsights = async (req, res) => {
       WHERE cycle_day = $1
       AND cycle_length_days = $2
       `,
-      [currentDay, cycle_length_days]
+      [currentDay, adjustedCycleLength]
     );
 
     if (cache.rows.length > 0) {
       return res.json({
         success: true,
         cycleDay: currentDay,
+        delayDays,
+        adjustedCycleLength,
         source: "cache",
         aiInsights: {
-          exerciseOptimization: cache.rows[0].exercise_optimization,
-          nutritionGuidance: cache.rows[0].nutrition_guidance,
-          sleepPattern: cache.rows[0].sleep_pattern,
-          symptomsForecast: cache.rows[0].symptoms_forecast
+          exerciseOptimization:
+            cache.rows[0].exercise_optimization,
+
+          nutritionGuidance:
+            cache.rows[0].nutrition_guidance,
+
+          sleepPattern:
+            cache.rows[0].sleep_pattern,
+
+          symptomsForecast:
+            cache.rows[0].symptoms_forecast
         }
       });
     }
 
-    // ✅ 4. Improved Prompt (IMPORTANT 🔥)
+    // ✅ 4. AI Prompt
     const prompt = `
 User menstrual cycle details:
+
 - Current cycle day: ${currentDay}
-- Cycle length: ${cycle_length_days} days
+- Cycle length: ${adjustedCycleLength} days
 - Bleeding duration: ${bleeding_days} days
 - Current phase: ${phase}
+- Delay days: ${delayDays}
 
 Provide personalized wellness guidance in JSON format.
 
@@ -107,14 +145,24 @@ Guidelines:
 `;
 
     // ✅ 5. Call AI
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.6
-    });
+    const response =
+      await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "user",
+            content: prompt
+          }
+        ],
+        temperature: 0.6
+      });
 
-    const aiOutput = response.choices[0].message.content;
-    const clean = aiOutput.replace(/```json|```/g, "");
+    const aiOutput =
+      response.choices[0].message.content;
+
+    const clean =
+      aiOutput.replace(/```json|```/g, "");
+
     const parsed = JSON.parse(clean);
 
     // ✅ 6. Save cache
@@ -132,7 +180,7 @@ Guidelines:
       `,
       [
         currentDay,
-        cycle_length_days,
+        adjustedCycleLength,
         parsed.exerciseOptimization,
         parsed.nutritionGuidance,
         parsed.sleepPattern,
@@ -141,9 +189,11 @@ Guidelines:
     );
 
     // ✅ 7. Response
-    res.json({
+    return res.json({
       success: true,
       cycleDay: currentDay,
+      delayDays,
+      adjustedCycleLength,
       source: "ai",
       aiInsights: parsed
     });
@@ -151,7 +201,7 @@ Guidelines:
   } catch (error) {
     console.error("AI cycle error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       message: "AI cycle prediction failed"
     });
   }
