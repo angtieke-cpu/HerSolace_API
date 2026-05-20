@@ -287,15 +287,31 @@ exports.getAiCycleInsightsWithInput = async (req, res) => {
     // ✅ Phase logic
     let phase = "";
 
-    if (currentDay <= bleeding_days) {
-      phase = "Menstrual";
-    } else if (currentDay <= 13) {
-      phase = "Follicular";
-    } else if (currentDay === 14) {
-      phase = "Ovulation";
-    } else {
-      phase = "Luteal";
-    }
+const ovulationDay = Math.floor(
+  adjustedCycleLength / 2
+);
+
+if (currentDay <= bleeding_days) {
+  phase = "Menstrual";
+
+} else if (currentDay < ovulationDay - 2) {
+  phase = "Follicular";
+
+} else if (
+  currentDay >= ovulationDay - 2 &&
+  currentDay <= ovulationDay + 2
+) {
+  phase = "Ovulation";
+
+} else if (
+  currentDay > ovulationDay + 2 &&
+  currentDay <= adjustedCycleLength
+) {
+  phase = "Luteal";
+
+} else {
+  phase = "Delayed";
+}
 
     // ✅ Prompt
     const prompt = `
