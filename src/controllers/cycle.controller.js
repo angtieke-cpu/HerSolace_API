@@ -243,7 +243,11 @@ exports.getPreviousCycleDetails = async (req, res) => {
     }
 
     // 🔧 Apply delay logic
-    const today = new Date();
+  const today = new Date(
+  new Date().toLocaleString("en-US", {
+    timeZone: "Asia/Kolkata",
+  })
+);
     const lastPeriodDate = new Date(last_period_date);
 
     const diffTime = today - lastPeriodDate;
