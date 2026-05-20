@@ -61,7 +61,8 @@ WHERE u.id = $1;
     }
 
     // 2️⃣ Calculate delay-based cycle adjustment
-    const today = new Date();
+   const diffDays =
+  Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
 
 
     const lastPeriodDate = new Date(last_period_date);
