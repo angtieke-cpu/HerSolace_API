@@ -17,7 +17,12 @@ exports.getCyclePrediction = async (req, res) => {
     const result = await db.query(
       `
       SELECT 
-@@ -26,33 +26,48 @@
+        u.name,
+
+        lp.period_date AS last_period_date,
+        lp.bleeding_days,
+
+        stats.cycle_length_days
 
       FROM users u
 
@@ -66,7 +71,23 @@ exports.getCyclePrediction = async (req, res) => {
       `,
       [userId]
     );
-@@ -76,100 +91,131 @@
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        message: "Journey details not found",
+      });
+    }
+
+    const {
+      name,
+      last_period_date,
+      cycle_length_days,
+      bleeding_days,
+    } = result.rows[0];
+
+    if (!last_period_date) {
+      return res.status(400).json({
+        message: "No period data available",
       });
     }
 
