@@ -13,7 +13,7 @@ exports.getCyclePrediction = async (req, res) => {
       });
     }
 
-    // 1️⃣ Get base data
+    // 1️⃣ Get user + cycle data
     const result = await db.query(
       `
       SELECT 
@@ -26,33 +26,48 @@ exports.getCyclePrediction = async (req, res) => {
 
       FROM users u
 
-      -- 🔹 Latest record
+      -- 🔹 Latest period record
       LEFT JOIN LATERAL (
-        SELECT period_date, bleeding_days
+        SELECT 
+          period_date,
+          bleeding_days
         FROM user_period_log
         WHERE user_id = u.id
         ORDER BY period_date DESC
         LIMIT 1
       ) lp ON TRUE
 
-      -- 🔹 Last 6 records average
-  LEFT JOIN LATERAL (
-  SELECT 
-    GREATEST(
-      COALESCE(ROUND(AVG(cycle_length)), 28),
-      COALESCE(MAX(cycle_length), 28)
-    ) AS cycle_length_days
-  FROM (
-    SELECT cycle_length
-    FROM user_period_log
-    WHERE user_id = u.id
-      AND cycle_length IS NOT NULL
-    ORDER BY period_date DESC
-    LIMIT 6
-  ) t
-) stats ON TRUE
+      -- 🔹 Average of last 6 cycles
+      -- but never less than latest logged cycle length
+      LEFT JOIN LATERAL (
+        SELECT 
+          GREATEST(
+            COALESCE(ROUND(AVG(cycle_length)), 28),
 
-      WHERE u.id = $1;
+            COALESCE(
+              (
+                SELECT cycle_length
+                FROM user_period_log
+                WHERE user_id = u.id
+                  AND cycle_length IS NOT NULL
+                ORDER BY period_date DESC
+                LIMIT 1
+              ),
+              28
+            )
+          ) AS cycle_length_days
+
+        FROM (
+          SELECT cycle_length
+          FROM user_period_log
+          WHERE user_id = u.id
+            AND cycle_length IS NOT NULL
+          ORDER BY period_date DESC
+          LIMIT 6
+        ) t
+      ) stats ON TRUE
+
+      WHERE u.id = $1
       `,
       [userId]
     );
@@ -76,33 +91,51 @@ exports.getCyclePrediction = async (req, res) => {
       });
     }
 
-    // 2️⃣ Calculate delay-based cycle adjustment
+    // 2️⃣ Normalize dates
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
     const lastPeriodDate = new Date(last_period_date);
+    lastPeriodDate.setHours(0, 0, 0, 0);
 
-    const diffTime = today - lastPeriodDate;
-    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    // 3️⃣ Calculate elapsed days
+    const diffTime =
+      today.getTime() - lastPeriodDate.getTime();
 
-    let adjustedCycleLength = cycle_length_days || 28;
+    const diffDays = Math.floor(
+      diffTime / (1000 * 60 * 60 * 24)
+    );
+
+    // 4️⃣ Delay logic
+    let adjustedCycleLength =
+      Number(cycle_length_days) || 28;
+
     let delayDays = 0;
 
-    // 👉 If user missed logging (cycle exceeded)
+    // If cycle exceeded predicted length
     if (diffDays > adjustedCycleLength) {
       delayDays = diffDays - adjustedCycleLength;
-      adjustedCycleLength = adjustedCycleLength + delayDays;
+
+      adjustedCycleLength =
+        adjustedCycleLength + delayDays;
     }
 
 
-    // 3️⃣ Calculate cycle
+
+    // 5️⃣ Calculate cycle phase
     const cycleData = calculateCycle({
-      lastPeriodDate: lastPeriodDate,
+      lastPeriodDate,
       cycleLength: adjustedCycleLength,
       bleedingDays: bleeding_days,
     });
 
-    const { phase, stage, currentDay } = cycleData;
+    const {
+      phase,
+      stage,
+      currentDay,
+    } = cycleData;
 
-    // 4️⃣ OLD TABLE (minimal fields)
+    // 6️⃣ Old guide table
     const oldGuide = await db.query(
       `
       SELECT
@@ -117,7 +150,7 @@ exports.getCyclePrediction = async (req, res) => {
       [currentDay]
     );
 
-    // 5️⃣ NEW TABLE (range + stage match)
+    // 7️⃣ New guide table
     const newGuide = await db.query(
       `
       SELECT *
@@ -129,26 +162,39 @@ exports.getCyclePrediction = async (req, res) => {
       [phase, stage]
     );
 
+    // Merge guides
     const cycleGuide = {
       ...(oldGuide.rows[0] || {}),
       ...(newGuide.rows[0] || {}),
     };
 
-    // 6️⃣ Response
-    res.json({
+    // 8️⃣ Final response
+    return res.json({
       success: true,
       data: {
         username: name,
+
         ...cycleData,
-        delayDays,
+
+        cycleLengthUsed: cycle_length_days,
+
         adjustedCycleLength,
+
+        delayDays,
+
+        diffDays,
+
         cycleGuide,
       },
     });
 
   } catch (error) {
-    console.error("Cycle prediction error:", error);
-    res.status(500).json({
+    console.error(
+      "Cycle prediction error:",
+      error
+    );
+
+    return res.status(500).json({
       message: "Failed to calculate cycle",
     });
   }
