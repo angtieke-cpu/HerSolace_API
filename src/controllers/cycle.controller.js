@@ -214,10 +214,7 @@ exports.getPreviousCycleDetails = async (req, res) => {
       adjustedCycleLength = adjustedCycleLength + delayDays;
     }
 
-    // 👉 Safety cap
-    if (adjustedCycleLength > 45) {
-      adjustedCycleLength = 45;
-    }
+  
 
     // ✅ Response
     res.json({
