@@ -1,6 +1,11 @@
 const dayjs = require("dayjs");
 const db = require("../db");
 const OpenAI = require("openai");
+const utc = require("dayjs/plugin/utc");
+const timezone = require("dayjs/plugin/timezone");
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
