@@ -36,24 +36,21 @@ exports.getCyclePrediction = async (req, res) => {
       ) lp ON TRUE
 
       -- 🔹 Last 6 records average
-      LEFT JOIN LATERAL (
-        SELECT 
-          COALESCE(
-            CASE 
-              WHEN COUNT(*) = 1 THEN MAX(cycle_length)
-              ELSE ROUND(AVG(cycle_length))
-            END,
-            28
-          ) AS cycle_length_days
-        FROM (
-          SELECT cycle_length
-          FROM user_period_log
-          WHERE user_id = u.id
-            AND cycle_length IS NOT NULL
-          ORDER BY period_date DESC
-          LIMIT 6
-        ) t
-      ) stats ON TRUE
+  LEFT JOIN LATERAL (
+  SELECT 
+    GREATEST(
+      COALESCE(ROUND(AVG(cycle_length)), 28),
+      COALESCE(MAX(cycle_length), 28)
+    ) AS cycle_length_days
+  FROM (
+    SELECT cycle_length
+    FROM user_period_log
+    WHERE user_id = u.id
+      AND cycle_length IS NOT NULL
+    ORDER BY period_date DESC
+    LIMIT 6
+  ) t
+) stats ON TRUE
 
       WHERE u.id = $1;
       `,
