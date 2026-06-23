@@ -368,3 +368,39 @@ Instructions:
     });
   }
 };
+
+{
+ "success":true,
+ "data":{
+   "cycleAnalysis":{
+      "cycleDay":22,
+      "phase":"Luteal",
+      "nextPeriod":"2026-07-01",
+      "ovulation":"2026-06-17"
+   },
+
+   "aiInsights":{
+      "tripSuitability":"Good",
+      "expectedSymptoms":[
+        "mild bloating",
+        "lower energy"
+      ],
+      "travelPreparation":[
+        "carry comfortable clothing",
+        "keep hydration"
+      ],
+      "recommendedActivities":[
+        "light sightseeing",
+        "relaxed walking"
+      ],
+      "thingsToAvoid":[
+        "very exhausting activities near PMS"
+      ],
+      "periodManagementTips":[
+        "carry period products"
+      ],
+      "bestAdvice":
+        "Trip dates are suitable with minor PMS preparation."
+   }
+ }
+}
