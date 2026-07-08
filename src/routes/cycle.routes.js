@@ -20,6 +20,7 @@ router.get("/cycle-hormones", authenticate, getCycleHormoneData);
 router.post("/daily-log", authenticate, createDailyLog);
 router.get("/daily-log", authenticate, getTodayLog);
 router.get("/cycle-history", authenticate, getUserPeriodLogs);
+router.get("/period-status", authenticate, checkLatestPeriodLogged);
 router.get("/cycle-details-prediction", authenticate, getPreviousCycleandPredictionDetails);
 
 
