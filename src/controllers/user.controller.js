@@ -257,39 +257,52 @@ exports.getLinkedProfiles = async (req, res) => {
         message: "userid header required"
       });
     }
-const result = await db.query(
-  `
-  SELECT 
-    u.id,
-    u.name,
-    u.mobile_number,
-    upl.period_date AS last_period_date,
-    upl.bleeding_days,
-    upl.cycle_length
 
-  FROM user_profile_links uplink
+    const result = await db.query(
+      `
+      SELECT 
+        u.id,
+        u.name,
+        u.mobile_number,
 
-  JOIN users u 
-    ON u.id = uplink.linked_user_id
+        uplink.relationship,
+        uplink.status,
 
-  LEFT JOIN user_period_log upl
-    ON upl.user_id = u.id
-    AND upl.period_date = (
-      SELECT MAX(period_date)
-      FROM user_period_log
-      WHERE user_id = u.id
-    )
+        upl.period_date AS last_period_date,
+        upl.bleeding_days,
+        upl.cycle_length
 
-  WHERE uplink.user_id = $1;
-  `,
-  [userId]
-);
+      FROM user_profile_links uplink
 
-    res.json(result.rows);
+      JOIN users u 
+        ON u.id = uplink.linked_user_id
+
+      LEFT JOIN user_period_log upl
+        ON upl.user_id = u.id
+        AND upl.period_date = (
+          SELECT MAX(period_date)
+          FROM user_period_log
+          WHERE user_id = u.id
+        )
+
+      WHERE uplink.user_id = $1
+        AND uplink.status = 'approved'
+        AND uplink.is_blocked = false
+
+      ORDER BY uplink.created_at DESC;
+      `,
+      [userId]
+    );
+
+    return res.json({
+      success: true,
+      count: result.rows.length,
+      data: result.rows
+    });
 
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Get linked profiles error:", error);
+    return res.status(500).json({ message: "Server error" });
   }
 };
 
