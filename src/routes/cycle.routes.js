@@ -10,7 +10,7 @@ const { getTodayLog } = require("../controllers/cycle.controller");
 const { getUserPeriodLogs } = require("../controllers/cycle.controller");
 const { updateLatestCycleDetails } = require("../controllers/cycle.controller");
 const { getPreviousCycleandPredictionDetails } = require("../controllers/cycle.controller");
-
+const { checkLatestPeriodLogged } = require("../controllers/cycle.controller");
 
 router.get("/prediction",authenticate, getCyclePrediction);
 router.get("/cycle-details", authenticate, getPreviousCycleDetails);
