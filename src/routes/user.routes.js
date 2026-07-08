@@ -10,6 +10,7 @@ const { getTaggedLinkedUsers } = require("../controllers/user.controller");
 const { deleteLinkedUser } = require("../controllers/user.controller");
 const { updateUserSettings } = require("../controllers/user.controller"); 
 const { createUserDeleteRequest } = require("../controllers/user.controller"); 
+const { updateProfileLinkRequest } = require("../controllers/user.controller");
 const { getHomeNotifications } = require("../controllers/user.controller"); 
 
 
