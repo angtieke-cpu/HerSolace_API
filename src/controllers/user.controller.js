@@ -632,30 +632,44 @@ exports.getHomeNotifications = async (req, res) => {
 
     // 2. Pending link profile requests
     const linkRequestsResult = await db.query(
-      `
-      SELECT 
-        upl.id AS link_id,
-        upl.relationship,
-        upl.status,
-        upl.created_at,
-        u.id AS requested_user_id,
-        u.name,
-        u.mobile_number
-      FROM user_profile_links upl
-      JOIN users u ON u.id = upl.requested_by
-      WHERE upl.linked_user_id = $1
-        AND upl.status = 'pending'
-        AND upl.is_blocked = false
-      ORDER BY upl.created_at DESC
-      `,
-      [userId]
-    );
+  `
+  SELECT 
+    upl.id AS link_id,
+    upl.relationship,
+    upl.status,
+    upl.reject_count,
+    (3 - upl.reject_count) AS remaining_attempts,
+    CASE 
+      WHEN upl.reject_count >= 2 THEN true
+      ELSE false
+    END AS will_block_on_reject,
+    upl.created_at,
 
-    return res.json({
-      success: true,
-      periodNotifications: notifications,
-      linkProfileRequests: linkRequestsResult.rows
-    });
+    u.id AS requested_user_id,
+    u.name,
+    u.mobile_number
+
+  FROM user_profile_links upl
+
+  JOIN users u 
+    ON u.id = upl.requested_by
+
+  WHERE upl.linked_user_id = $1
+    AND upl.status = 'pending'
+    AND upl.is_blocked = false
+
+  ORDER BY upl.created_at DESC
+  `,
+  [userId]
+);
+
+   return res.json({
+  success: true,
+  periodNotifications: notifications,
+
+  linkProfileRequestsCount: linkRequestsResult.rows.length,
+  linkProfileRequests: linkRequestsResult.rows
+});
 
   } catch (error) {
     console.error("Notification API error:", error);
