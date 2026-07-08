@@ -140,16 +140,19 @@ WHERE id = (
 
 exports.linkUserProfile = async (req, res) => {
   try {
-    const headerUserId = req.user.userId;
+    const requestedBy = req.user.userId;
     const { mobile_number, relationship } = req.body;
 
-    if (!headerUserId) {
+    if (!requestedBy) {
+      return res.status(400).json({ message: "userid header required" });
+    }
+
+    if (!mobile_number || !relationship) {
       return res.status(400).json({
-        message: "userid header required"
+        message: "mobile_number and relationship required"
       });
     }
 
-    // Find user by mobile number
     const userResult = await db.query(
       `SELECT id FROM users WHERE mobile_number = $1`,
       [mobile_number]
@@ -161,31 +164,87 @@ exports.linkUserProfile = async (req, res) => {
       });
     }
 
-    const mobileUserId = userResult.rows[0].id;
+    const linkedUserId = userResult.rows[0].id;
 
-    // Prevent linking to self
-    if (mobileUserId === Number(headerUserId)) {
+    if (String(linkedUserId) === String(requestedBy)) {
       return res.status(400).json({
         message: "Cannot link your own profile"
       });
     }
 
-    // Reverse link logic
-    await db.query(
+    const existing = await db.query(
       `
-      INSERT INTO user_profile_links (user_id, linked_user_id, relationship)
-      VALUES ($1, $2, $3)
+      SELECT *
+      FROM user_profile_links
+      WHERE requested_by = $1
+        AND linked_user_id = $2
+      LIMIT 1
       `,
-      [mobileUserId, headerUserId, relationship]
+      [requestedBy, linkedUserId]
     );
 
-    res.json({
-      message: "Profile linked successfully"
+    if (existing.rows.length > 0) {
+      const link = existing.rows[0];
+
+      if (link.is_blocked || link.status === "blocked") {
+        return res.status(403).json({
+          message: "Profile link request blocked after 3 rejections"
+        });
+      }
+
+      if (link.status === "pending") {
+        return res.status(400).json({
+          message: "Approval already pending"
+        });
+      }
+
+      if (link.status === "approved") {
+        return res.status(400).json({
+          message: "Profile already linked"
+        });
+      }
+
+      await db.query(
+        `
+        UPDATE user_profile_links
+        SET status = 'pending',
+            relationship = $1,
+            rejected_at = NULL,
+            created_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+        `,
+        [relationship, link.id]
+      );
+
+      return res.json({
+        success: true,
+        message: "Profile link request sent again for approval"
+      });
+    }
+
+    await db.query(
+      `
+      INSERT INTO user_profile_links
+      (
+        user_id,
+        linked_user_id,
+        relationship,
+        requested_by,
+        status
+      )
+      VALUES ($1, $2, $3, $4, 'pending')
+      `,
+      [requestedBy, linkedUserId, relationship, requestedBy]
+    );
+
+    return res.json({
+      success: true,
+      message: "Profile link request sent for approval"
     });
 
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Link profile error:", error);
+    return res.status(500).json({ message: "Server error" });
   }
 };
 
