@@ -181,6 +181,76 @@ WHERE u.id = $1;
         });
     }
 };
+
+exports.checkLatestPeriodLogged = async (req, res) => {
+    try {
+        const userId = req.user.userId;
+
+        if (!userId) {
+            return res.status(400).json({
+                success: false,
+                message: "userid header required"
+            });
+        }
+
+        // Latest period log
+        const result = await db.query(
+            `
+            SELECT
+                period_date,
+                cycle_length
+            FROM user_period_log
+            WHERE user_id = $1
+            ORDER BY period_date DESC
+            LIMIT 1
+            `,
+            [userId]
+        );
+
+        // No logs found
+        if (result.rows.length === 0) {
+            return res.json({
+                success: true,
+                hasLoggedLatestPeriod: false,
+                message: "No period logs found."
+            });
+        }
+
+        const log = result.rows[0];
+
+        const cycleLength = Number(log.cycle_length) || 28;
+
+        const today = dayjs()
+            .tz("Asia/Kolkata")
+            .startOf("day");
+
+        const lastPeriod = dayjs(log.period_date)
+            .tz("Asia/Kolkata")
+            .startOf("day");
+
+        const nextExpectedPeriod = lastPeriod.add(cycleLength, "day");
+
+        const hasLoggedLatestPeriod = today.isBefore(nextExpectedPeriod);
+
+        return res.json({
+            success: true,
+            hasLoggedLatestPeriod,
+            lastPeriodDate: lastPeriod.format("YYYY-MM-DD"),
+            expectedNextPeriod: nextExpectedPeriod.format("YYYY-MM-DD"),
+            daysOverdue: hasLoggedLatestPeriod
+                ? 0
+                : today.diff(nextExpectedPeriod, "day")
+        });
+
+    } catch (error) {
+        console.error(error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error"
+        });
+    }
+};
 exports.getPreviousCycleDetails = async (req, res) => {
     try {
         const userId = req.user.userId;
