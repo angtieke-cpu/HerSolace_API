@@ -10,6 +10,8 @@ const { getTaggedLinkedUsers } = require("../controllers/user.controller");
 const { deleteLinkedUser } = require("../controllers/user.controller");
 const { updateUserSettings } = require("../controllers/user.controller"); 
 const { createUserDeleteRequest } = require("../controllers/user.controller"); 
+const { getHomeNotifications } = require("../controllers/user.controller"); 
+
 
 router.post("/user-details", authenticate, updateUserProfile);
 router.get("/user-details", authenticate, getUserProfile);
@@ -20,5 +22,6 @@ router.get("/shared-users", authenticate, getTaggedLinkedUsers);
 router.post("/unlink-user", authenticate, deleteLinkedUser);
 router.post("/user-settings", authenticate, updateUserSettings);
 router.post("/user-delete-request", authenticate, createUserDeleteRequest);
+router.get("/user-notifications", authenticate, getHomeNotifications);
 
 module.exports = router;
