@@ -679,3 +679,136 @@ exports.getHomeNotifications = async (req, res) => {
     });
   }
 };
+exports.updateProfileLinkRequest = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { link_id, action } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ message: "userid header required" });
+    }
+
+    if (!link_id || !action) {
+      return res.status(400).json({
+        message: "link_id and action required"
+      });
+    }
+
+    if (!["approve", "reject", "block"].includes(action)) {
+      return res.status(400).json({
+        message: "Invalid action. Use approve, reject, or block"
+      });
+    }
+
+    const requestResult = await db.query(
+      `
+      SELECT *
+      FROM user_profile_links
+      WHERE id = $1
+        AND linked_user_id = $2
+        AND status = 'pending'
+        AND is_blocked = false
+      `,
+      [link_id, userId]
+    );
+
+    if (requestResult.rows.length === 0) {
+      return res.status(404).json({
+        message: "Pending profile request not found"
+      });
+    }
+
+    const link = requestResult.rows[0];
+
+    if (action === "approve") {
+      await db.query(
+        `
+        UPDATE user_profile_links
+        SET status = 'approved',
+            approved_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        `,
+        [link_id]
+      );
+
+      return res.json({
+        success: true,
+        action: "approve",
+        message: "Profile request approved"
+      });
+    }
+
+    if (action === "block") {
+      await db.query(
+        `
+        UPDATE user_profile_links
+        SET status = 'blocked',
+            is_blocked = true,
+            rejected_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        `,
+        [link_id]
+      );
+
+      return res.json({
+        success: true,
+        action: "block",
+        blocked: true,
+        message: "Profile request blocked"
+      });
+    }
+
+    if (action === "reject") {
+      const newRejectCount = Number(link.reject_count || 0) + 1;
+
+      if (newRejectCount >= 3) {
+        await db.query(
+          `
+          UPDATE user_profile_links
+          SET status = 'blocked',
+              reject_count = $1,
+              is_blocked = true,
+              rejected_at = CURRENT_TIMESTAMP
+          WHERE id = $2
+          `,
+          [newRejectCount, link_id]
+        );
+
+        return res.json({
+          success: true,
+          action: "reject",
+          blocked: true,
+          reject_count: newRejectCount,
+          message: "Request rejected 3 times. Profile request blocked."
+        });
+      }
+
+      await db.query(
+        `
+        UPDATE user_profile_links
+        SET status = 'rejected',
+            reject_count = $1,
+            rejected_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+        `,
+        [newRejectCount, link_id]
+      );
+
+      return res.json({
+        success: true,
+        action: "reject",
+        blocked: false,
+        reject_count: newRejectCount,
+        remaining_attempts: 3 - newRejectCount,
+        message: "Profile request rejected"
+      });
+    }
+
+  } catch (error) {
+    console.error("Update profile link request error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
+  }
+};
