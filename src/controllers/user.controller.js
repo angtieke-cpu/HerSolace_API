@@ -528,3 +528,140 @@ exports.createUserDeleteRequest = async (req, res) => {
     });
   }
 };
+exports.getHomeNotifications = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "userid header required"
+      });
+    }
+
+    const today = new Date(
+      new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
+    );
+    today.setHours(0, 0, 0, 0);
+
+    // 1. Latest period log
+    const periodResult = await db.query(
+      `
+      SELECT period_date, cycle_length, bleeding_days
+      FROM user_period_log
+      WHERE user_id = $1
+      ORDER BY period_date DESC
+      LIMIT 1
+      `,
+      [userId]
+    );
+
+    const notifications = [];
+
+    if (periodResult.rows.length > 0) {
+      const log = periodResult.rows[0];
+
+      const cycleLength = Number(log.cycle_length) || 28;
+      const bleedingDays = Number(log.bleeding_days) || 5;
+
+      const lastPeriodDate = new Date(
+        new Date(log.period_date).toLocaleString("en-US", {
+          timeZone: "Asia/Kolkata"
+        })
+      );
+      lastPeriodDate.setHours(0, 0, 0, 0);
+
+      const nextPeriodDate = new Date(lastPeriodDate);
+      nextPeriodDate.setDate(lastPeriodDate.getDate() + cycleLength);
+
+      const ovulationDate = new Date(lastPeriodDate);
+      ovulationDate.setDate(lastPeriodDate.getDate() + cycleLength - 14);
+
+      const fertileStartDate = new Date(ovulationDate);
+      fertileStartDate.setDate(ovulationDate.getDate() - 5);
+
+      const fertileEndDate = new Date(ovulationDate);
+      fertileEndDate.setDate(ovulationDate.getDate() + 1);
+
+      const daysToPeriod = Math.ceil(
+        (nextPeriodDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+      );
+
+      const daysToOvulation = Math.ceil(
+        (ovulationDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+      );
+
+      const daysToFertile = Math.ceil(
+        (fertileStartDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+      );
+
+      // Period starts within 7 days
+      if (daysToPeriod >= 0 && daysToPeriod <= 7) {
+        notifications.push({
+          type: "period_reminder",
+          title: "Period reminder",
+          message: `Your period is expected within ${daysToPeriod === 0 ? "today" : daysToPeriod + " days"}. Keep essentials ready and log any symptoms early.`,
+          expected_window: `within ${daysToPeriod === 0 ? "today" : daysToPeriod + " days"}`,
+          date: nextPeriodDate.toISOString().split("T")[0]
+        });
+      }
+
+      // Ovulation within 7 days
+      if (daysToOvulation >= 0 && daysToOvulation <= 7) {
+        notifications.push({
+          type: "ovulation_reminder",
+          title: "Ovulation reminder",
+          message: `Your ovulation is expected within ${daysToOvulation === 0 ? "today" : daysToOvulation + " days"}.`,
+          expected_window: `within ${daysToOvulation === 0 ? "today" : daysToOvulation + " days"}`,
+          date: ovulationDate.toISOString().split("T")[0]
+        });
+      }
+
+      // Fertile window starts within 7 days
+      if (daysToFertile >= 0 && daysToFertile <= 7) {
+        notifications.push({
+          type: "fertile_window_reminder",
+          title: "Fertile window reminder",
+          message: `Your fertile window is expected within ${daysToFertile === 0 ? "today" : daysToFertile + " days"}.`,
+          expected_window: `within ${daysToFertile === 0 ? "today" : daysToFertile + " days"}`,
+          start_date: fertileStartDate.toISOString().split("T")[0],
+          end_date: fertileEndDate.toISOString().split("T")[0]
+        });
+      }
+    }
+
+    // 2. Pending link profile requests
+    const linkRequestsResult = await db.query(
+      `
+      SELECT 
+        upl.id AS link_id,
+        upl.relationship,
+        upl.status,
+        upl.created_at,
+        u.id AS requested_user_id,
+        u.name,
+        u.mobile_number
+      FROM user_profile_links upl
+      JOIN users u ON u.id = upl.requested_by
+      WHERE upl.linked_user_id = $1
+        AND upl.status = 'pending'
+        AND upl.is_blocked = false
+      ORDER BY upl.created_at DESC
+      `,
+      [userId]
+    );
+
+    return res.json({
+      success: true,
+      periodNotifications: notifications,
+      linkProfileRequests: linkRequestsResult.rows
+    });
+
+  } catch (error) {
+    console.error("Notification API error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
+  }
+};
