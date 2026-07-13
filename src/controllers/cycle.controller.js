@@ -916,24 +916,55 @@ exports.updateLatestCycleDetails = async (req, res) => {
 
 };
 
-exports.getPreviousCycleandPredictionDetails = async (req, res) => {
+exports.getCycleCalendarDetails = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
 
-    try {
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "userid required"
+      });
+    }
 
-        const userId = req.user.userId;
+    /*
+     * Optional:
+     * GET /api/cycle/calendar-details?month=2026-07
+     *
+     * When month is supplied, selectedMonthData will contain
+     * only that month's calendar details.
+     */
+    const { month } = req.query;
 
+    if (month && !/^\d{4}-\d{2}$/.test(month)) {
+      return res.status(400).json({
+        success: false,
+        message: "month must be in YYYY-MM format"
+      });
+    }
 
-        if (!userId) {
-            return res.status(400).json({
-                message: "userId required"
-            });
-        }
+    const today = dayjs()
+      .tz("Asia/Kolkata")
+      .startOf("day");
 
+    /*
+     * Prediction range:
+     * Previous 6 calendar months through future 12 calendar months.
+     */
+    const rangeStart = today
+      .subtract(6, "month")
+      .startOf("month");
 
+    const rangeEnd = today
+      .add(12, "month")
+      .endOf("month");
 
-        // Fetch cycle history
-        const result = await db.query(
-            `
+    // ---------------------------------------------------------
+    // 1. Fetch complete period history
+    // ---------------------------------------------------------
+
+    const periodResult = await db.query(
+      `
       SELECT
         id,
         period_date,
@@ -943,581 +974,1045 @@ exports.getPreviousCycleandPredictionDetails = async (req, res) => {
       WHERE user_id = $1
       ORDER BY period_date ASC
       `,
-            [userId]
-        );
-
-
-
-        if (result.rows.length === 0) {
-
-            return res.json({
-
-                success: true,
-
-                data: {
-                    history: [],
-                    current_cycle: null,
-                    predictions: null,
-
-                    statistics: {
-                        average_cycle_length: 28,
-                        regularity: "—",
-                        regularity_score: 0,
-                        total_cycles_tracked: 0
-                    }
-
-                }
-
-            });
-
-        }
-
-
-
-
-        // Format history
-        const history = result.rows.map(row => ({
-
-            id: row.id,
-
-            period_date:
-                dayjs(row.period_date)
-                    .format("YYYY-MM-DD"),
-
-            bleeding_days:
-                row.bleeding_days,
-
-            cycle_length:
-                row.cycle_length ?? null
-
-        }));
-
-
-
-
-
-        // ----------------------------
-        // Cycle Length Calculation
-        // SAME AS FRONTEND
-        // ----------------------------
-
-        let cycleLength = 28;
-
-
-        if (history.length === 1) {
-
-            cycleLength =
-                history[0].cycle_length || 28;
-
-        }
-
-
-        if (history.length > 1) {
-
-            let total = 0;
-
-
-            for (let i = 1; i < history.length; i++) {
-
-                total += dayjs(
-                    history[i].period_date
-                )
-                    .diff(
-                        dayjs(history[i - 1].period_date),
-                        "day"
-                    );
-
-            }
-
-
-            cycleLength =
-                Math.round(
-                    total / (history.length - 1)
-                );
-
-        }
-
-
-
-
-        const lastRecord =
-            history[history.length - 1];
-
-
-        const lastPeriod =
-            dayjs(lastRecord.period_date);
-
-
-
-        const bleedingDays =
-            lastRecord.bleeding_days || 5;
-
-
-
-
-
-
-        // ----------------------------
-        // Today IST
-        // ----------------------------
-
-        const today =
-            dayjs()
-                .tz("Asia/Kolkata")
-                .startOf("day");
-
-
-
-
-
-
-        // ----------------------------
-        // Effective Cycle Start
-        // SAME AS FRONTEND
-        // ----------------------------
-
-        let effectiveCycleStart =
-            lastPeriod;
-
-
+      [userId]
+    );
+
+    /*
+     * Return calendar support data even when period history
+     * does not exist.
+     */
+    if (periodResult.rows.length === 0) {
+      const [healthLogsResult, plannerResult] = await Promise.all([
+        db.query(
+          `
+          SELECT
+            id,
+            log_date,
+            log_data,
+            created_at,
+            updated_at
+          FROM daily_health_logs
+          WHERE user_id = $1
+            AND log_date BETWEEN $2::date AND $3::date
+          ORDER BY log_date ASC
+          `,
+          [
+            userId,
+            rangeStart.format("YYYY-MM-DD"),
+            rangeEnd.format("YYYY-MM-DD")
+          ]
+        ),
+
+        db.query(
+          `
+          SELECT
+            id,
+            start_date,
+            end_date,
+            purpose,
+            activity,
+            ai_insights,
+            created_at,
+            updated_at
+          FROM cycle_trip_planner_insights
+          WHERE user_id = $1
+            AND start_date <= $3::date
+            AND end_date >= $2::date
+          ORDER BY start_date ASC
+          `,
+          [
+            userId,
+            rangeStart.format("YYYY-MM-DD"),
+            rangeEnd.format("YYYY-MM-DD")
+          ]
+        )
+      ]);
+
+      const healthLogDates = healthLogsResult.rows.map((row) => ({
+        id: row.id,
+        date: dayjs(row.log_date).format("YYYY-MM-DD"),
+        logData: row.log_data,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      }));
+
+      const plannerDates = [];
+
+      for (const planner of plannerResult.rows) {
+        let currentDate = dayjs(planner.start_date).startOf("day");
+        const plannerEnd = dayjs(planner.end_date).startOf("day");
 
         while (
-            effectiveCycleStart
-                .add(cycleLength, "day")
-                .isBefore(today)
+          currentDate.isBefore(plannerEnd, "day") ||
+          currentDate.isSame(plannerEnd, "day")
         ) {
-
-            effectiveCycleStart =
-                effectiveCycleStart
-                    .add(cycleLength, "day");
-
-        }
-
-
-
-
-
-        // ----------------------------
-        // Cycle Predictions
-        // ----------------------------
-
-
-        const ovulation =
-            effectiveCycleStart
-                .add(
-                    cycleLength - 14,
-                    "day"
-                );
-
-
-
-        const fertileStart =
-            ovulation
-                .subtract(5, "day");
-
-
-
-        const fertileEnd =
-            ovulation;
-
-
-
-        const rawNextPeriod =
-            effectiveCycleStart
-                .add(
-                    cycleLength,
-                    "day"
-                );
-
-
-
-        const firstExpectedPeriod =
-            lastPeriod
-                .add(
-                    cycleLength,
-                    "day"
-                );
-
-
-
-        const isOverdue =
-            firstExpectedPeriod.isBefore(today);
-
-
-
-        const nextPeriod =
-            isOverdue
-                ?
-                today.add(1, "day")
-                :
-                rawNextPeriod;
-
-
-
-
-
-        const pmsStart =
-            nextPeriod.subtract(5, "day");
-
-
-        const pmsEnd =
-            nextPeriod.subtract(1, "day");
-
-
-
-
-
-        const daysUntilNextPeriod =
-            nextPeriod.diff(
-                today,
+          if (
+            !currentDate.isBefore(rangeStart, "day") &&
+            !currentDate.isAfter(rangeEnd, "day")
+          ) {
+            plannerDates.push({
+              plannerId: planner.id,
+              date: currentDate.format("YYYY-MM-DD"),
+              startDate: dayjs(planner.start_date).format("YYYY-MM-DD"),
+              endDate: dayjs(planner.end_date).format("YYYY-MM-DD"),
+              purpose: planner.purpose,
+              activity: planner.activity,
+              isStartDate: currentDate.isSame(
+                dayjs(planner.start_date),
                 "day"
-            );
-
-
-
-
-
-
-        // ----------------------------
-        // Fertility Level
-        // SAME AS FRONTEND
-        // ----------------------------
-
-
-        let fertilityLevel = "Low";
-
-
-        if (
-            today.format("YYYY-MM-DD")
-            ===
-            ovulation.format("YYYY-MM-DD")
-        ) {
-
-            fertilityLevel = "Peak";
-
-        }
-        else if (
-
-            (
-                today.isAfter(
-                    fertileStart
-                )
-                ||
-                today.isSame(
-                    fertileStart
-                )
-            )
-            &&
-            (
-                today.isBefore(
-                    fertileEnd
-                )
-                ||
-                today.isSame(
-                    fertileEnd
-                )
-            )
-
-        ) {
-
-            fertilityLevel = "High";
-
-        }
-
-
-
-
-
-
-
-
-        // ----------------------------
-        // Regularity Calculation
-        // SAME AS FRONTEND
-        // ----------------------------
-
-
-        let regularity = "—";
-        let regularityScore = 0;
-
-
-
-        if (history.length >= 2) {
-
-            let diffs = [];
-
-
-            for (let i = 1; i < history.length; i++) {
-
-                diffs.push(
-
-                    dayjs(
-                        history[i].period_date
-                    )
-                        .diff(
-                            dayjs(history[i - 1].period_date),
-                            "day"
-                        )
-
-                );
-
-            }
-
-
-
-            const avg =
-                diffs.reduce(
-                    (a, b) => a + b,
-                    0
-                )
-                /
-                diffs.length;
-
-
-
-            const variance =
-                diffs.reduce(
-                    (sum, value) =>
-                        sum +
-                        Math.abs(value - avg),
-                    0
-                )
-                /
-                diffs.length;
-
-
-
-            regularity =
-                variance <= 2
-                    ?
-                    "Regular"
-                    :
-                    "Irregular";
-
-
-
-            regularityScore =
-                Math.max(
-                    0,
-                    Math.min(
-                        100,
-                        Math.round(
-                            100 - (variance * 8)
-                        )
-                    )
-                );
-
-
-        }
-
-
-
-
-
-        // ----------------------------
-        // Future Cycles
-        // SAME AS FRONTEND 12 cycles
-        // ----------------------------
-
-
-        const futureCycles = [];
-
-
-
-        for (let i = 0; i < 12; i++) {
-
-
-            const period =
-                nextPeriod
-                    .add(
-                        i * cycleLength,
-                        "day"
-                    );
-
-
-
-            const futureOvulation =
-                period
-                    .add(
-                        cycleLength - 14,
-                        "day"
-                    );
-
-
-
-            futureCycles.push({
-
-                period_date:
-                    period.format("YYYY-MM-DD"),
-
-
-                ovulation_date:
-                    futureOvulation.format("YYYY-MM-DD"),
-
-
-                fertile_start:
-                    futureOvulation
-                        .subtract(5, "day")
-                        .format("YYYY-MM-DD"),
-
-
-                fertile_end:
-                    futureOvulation
-                        .format("YYYY-MM-DD")
-
+              ),
+              isEndDate: currentDate.isSame(
+                dayjs(planner.end_date),
+                "day"
+              )
             });
+          }
 
-
+          currentDate = currentDate.add(1, "day");
         }
-
-
-
-
-
-
-
-        // ----------------------------
-        // FINAL RESPONSE
-        // ----------------------------
-
-
-        return res.json({
-
-            success: true,
-
-
-            data: {
-
-
-                history,
-
-
-
-                current_cycle: {
-
-
-                    last_period_date:
-                        lastPeriod.format("YYYY-MM-DD"),
-
-
-                    bleeding_days:
-                        bleedingDays,
-
-
-                    cycle_length:
-                        cycleLength,
-
-
-
-                    ovulation_date:
-                        ovulation.format("YYYY-MM-DD"),
-
-
-
-                    fertile_window: {
-
-                        start:
-                            fertileStart.format("YYYY-MM-DD"),
-
-
-                        end:
-                            fertileEnd.format("YYYY-MM-DD")
-
-                    },
-
-
-
-                    next_period_date:
-                        nextPeriod.format("YYYY-MM-DD"),
-
-
-
-                    pms_window: {
-
-
-                        start:
-                            pmsStart.format("YYYY-MM-DD"),
-
-
-                        end:
-                            pmsEnd.format("YYYY-MM-DD")
-
-                    }
-
-
-                },
-
-
-
-                predictions: {
-
-
-                    next_period_date:
-                        nextPeriod.format("YYYY-MM-DD"),
-
-
-
-                    days_until_next_period:
-                        daysUntilNextPeriod,
-
-
-
-                    fertility_level:
-                        fertilityLevel,
-
-
-
-                    future_cycles:
-                        futureCycles
-
-                },
-
-
-
-
-                statistics: {
-
-
-                    average_cycle_length:
-                        cycleLength,
-
-
-                    regularity,
-
-
-                    regularity_score:
-                        regularityScore,
-
-
-                    total_cycles_tracked:
-                        history.length
-
-                }
-
-
-            }
-
-
-        });
-
-
-
+      }
+
+      return res.json({
+        success: true,
+        message: "No cycle history found",
+        data: {
+          range: {
+            startDate: rangeStart.format("YYYY-MM-DD"),
+            endDate: rangeEnd.format("YYYY-MM-DD"),
+            previousMonths: 6,
+            futureMonths: 12
+          },
+
+          cycleSummary: null,
+          confirmedPeriods: [],
+          predictedCycles: [],
+          calendarDays: [],
+          healthLogDates,
+          plannerDates
+        }
+      });
     }
-    catch (error) {
 
-        console.error(
-            "getPreviousCycleDetails Error:",
-            error
+    // ---------------------------------------------------------
+    // 2. Format history
+    // ---------------------------------------------------------
+
+    const history = periodResult.rows.map((row) => ({
+      id: row.id,
+
+      periodDate: dayjs(row.period_date)
+        .format("YYYY-MM-DD"),
+
+      bleedingDays:
+        Number(row.bleeding_days) || 5,
+
+      cycleLength:
+        row.cycle_length !== null
+          ? Number(row.cycle_length)
+          : null
+    }));
+
+    // ---------------------------------------------------------
+    // 3. Average cycle length
+    // Same calculation as frontend
+    // ---------------------------------------------------------
+
+    let cycleLength = 28;
+
+    if (history.length === 1) {
+      cycleLength =
+        Number(history[0].cycleLength) || 28;
+    } else {
+      let totalDifference = 0;
+
+      for (let index = 1; index < history.length; index++) {
+        totalDifference += dayjs(
+          history[index].periodDate
+        ).diff(
+          dayjs(history[index - 1].periodDate),
+          "day"
+        );
+      }
+
+      cycleLength = Math.round(
+        totalDifference / (history.length - 1)
+      );
+    }
+
+    /*
+     * Prevent invalid database values from breaking prediction.
+     */
+    if (
+      !Number.isFinite(cycleLength) ||
+      cycleLength < 15 ||
+      cycleLength > 60
+    ) {
+      cycleLength = 28;
+    }
+
+    const lastRecord = history[history.length - 1];
+
+    const lastPeriod = dayjs(
+      lastRecord.periodDate
+    ).startOf("day");
+
+    const bleedingDays =
+      Number(lastRecord.bleedingDays) || 5;
+
+    // ---------------------------------------------------------
+    // 4. Effective current-cycle start
+    // Same missed-cycle logic as frontend
+    // ---------------------------------------------------------
+
+    let effectiveCycleStart = lastPeriod;
+
+    while (
+      effectiveCycleStart
+        .add(cycleLength, "day")
+        .isBefore(today, "day")
+    ) {
+      effectiveCycleStart =
+        effectiveCycleStart.add(
+          cycleLength,
+          "day"
+        );
+    }
+
+    // ---------------------------------------------------------
+    // 5. Current cycle prediction
+    // ---------------------------------------------------------
+
+    const ovulation = effectiveCycleStart.add(
+      cycleLength - 14,
+      "day"
+    );
+
+    const fertileStart =
+      ovulation.subtract(5, "day");
+
+    const fertileEnd = ovulation;
+
+    const rawNextPeriod =
+      effectiveCycleStart.add(
+        cycleLength,
+        "day"
+      );
+
+    const firstExpectedPeriod =
+      lastPeriod.add(cycleLength, "day");
+
+    const isOverdue =
+      firstExpectedPeriod.isBefore(today, "day");
+
+    /*
+     * Same frontend behavior:
+     * when the first expected period is already past,
+     * next period is shown as tomorrow.
+     */
+    const nextPeriod = isOverdue
+      ? today.add(1, "day")
+      : rawNextPeriod;
+
+    const pmsStart =
+      nextPeriod.subtract(5, "day");
+
+    const pmsEnd =
+      nextPeriod.subtract(1, "day");
+
+    const daysUntilNextPeriod =
+      nextPeriod.diff(today, "day");
+
+    let fertilityLevel = "Low";
+
+    if (today.isSame(ovulation, "day")) {
+      fertilityLevel = "Peak";
+    } else if (
+      (
+        today.isAfter(fertileStart, "day") ||
+        today.isSame(fertileStart, "day")
+      ) &&
+      (
+        today.isBefore(fertileEnd, "day") ||
+        today.isSame(fertileEnd, "day")
+      )
+    ) {
+      fertilityLevel = "High";
+    }
+
+    // ---------------------------------------------------------
+    // 6. Regularity
+    // ---------------------------------------------------------
+
+    let regularity = "—";
+    let regularityScore = 0;
+
+    if (history.length >= 2) {
+      const differences = [];
+
+      for (let index = 1; index < history.length; index++) {
+        differences.push(
+          dayjs(history[index].periodDate).diff(
+            dayjs(history[index - 1].periodDate),
+            "day"
+          )
+        );
+      }
+
+      const average =
+        differences.reduce(
+          (sum, value) => sum + value,
+          0
+        ) / differences.length;
+
+      const variance =
+        differences.reduce(
+          (sum, value) =>
+            sum + Math.abs(value - average),
+          0
+        ) / differences.length;
+
+      regularity =
+        variance <= 2
+          ? "Regular"
+          : "Irregular";
+
+      regularityScore = Math.max(
+        0,
+        Math.min(
+          100,
+          Math.round(100 - variance * 8)
+        )
+      );
+    }
+
+    // ---------------------------------------------------------
+    // 7. Confirmed period days
+    // ---------------------------------------------------------
+
+    const confirmedPeriods = [];
+
+    for (const record of history) {
+      const periodStart = dayjs(
+        record.periodDate
+      ).startOf("day");
+
+      const recordBleedingDays =
+        Number(record.bleedingDays) || 5;
+
+      const recordCycleLength =
+        Number(record.cycleLength) ||
+        cycleLength;
+
+      const recordOvulation =
+        periodStart.add(
+          recordCycleLength - 14,
+          "day"
         );
 
+      for (
+        let dayIndex = 0;
+        dayIndex < recordBleedingDays;
+        dayIndex++
+      ) {
+        const periodDay =
+          periodStart.add(dayIndex, "day");
 
-        return res.status(500).json({
+        if (
+          !periodDay.isBefore(rangeStart, "day") &&
+          !periodDay.isAfter(rangeEnd, "day")
+        ) {
+          confirmedPeriods.push({
+            periodLogId: record.id,
+            date: periodDay.format("YYYY-MM-DD"),
+            periodStartDate:
+              periodStart.format("YYYY-MM-DD"),
+            dayNumber: dayIndex + 1,
+            type: "period",
+            status: "confirmed"
+          });
+        }
+      }
 
-            message:
-                "Failed to fetch cycle details"
-
+      if (
+        !recordOvulation.isBefore(rangeStart, "day") &&
+        !recordOvulation.isAfter(rangeEnd, "day")
+      ) {
+        confirmedPeriods.push({
+          periodLogId: record.id,
+          date: recordOvulation.format("YYYY-MM-DD"),
+          periodStartDate:
+            periodStart.format("YYYY-MM-DD"),
+          type: "ovulation",
+          status: "historical_calculation"
         });
-
+      }
     }
 
+    // ---------------------------------------------------------
+    // 8. Generate predicted cycles for previous 6 months
+    // and future 12 months
+    // ---------------------------------------------------------
+
+    const predictedCycles = [];
+
+    /*
+     * Find a cycle start on or before rangeStart.
+     */
+    let predictionCycleStart =
+      effectiveCycleStart;
+
+    while (
+      predictionCycleStart.isAfter(
+        rangeStart,
+        "day"
+      )
+    ) {
+      predictionCycleStart =
+        predictionCycleStart.subtract(
+          cycleLength,
+          "day"
+        );
+    }
+
+    /*
+     * Move one cycle forward when the previous subtraction
+     * went beyond the required boundary.
+     */
+    while (
+      predictionCycleStart
+        .add(cycleLength, "day")
+        .isBefore(rangeStart, "day")
+    ) {
+      predictionCycleStart =
+        predictionCycleStart.add(
+          cycleLength,
+          "day"
+        );
+    }
+
+    let predictionIndex = 0;
+    let cycleStart = predictionCycleStart;
+
+    while (
+      !cycleStart.isAfter(rangeEnd, "day")
+    ) {
+      const predictedOvulation =
+        cycleStart.add(
+          cycleLength - 14,
+          "day"
+        );
+
+      const predictedFertileStart =
+        predictedOvulation.subtract(5, "day");
+
+      const predictedFertileEnd =
+        predictedOvulation;
+
+      const predictedNextPeriod =
+        cycleStart.add(
+          cycleLength,
+          "day"
+        );
+
+      const predictedPmsStart =
+        predictedNextPeriod.subtract(5, "day");
+
+      const predictedPmsEnd =
+        predictedNextPeriod.subtract(1, "day");
+
+      const periodDates = [];
+
+      for (
+        let dayIndex = 0;
+        dayIndex < bleedingDays;
+        dayIndex++
+      ) {
+        const date =
+          cycleStart.add(dayIndex, "day");
+
+        if (
+          !date.isBefore(rangeStart, "day") &&
+          !date.isAfter(rangeEnd, "day")
+        ) {
+          periodDates.push(
+            date.format("YYYY-MM-DD")
+          );
+        }
+      }
+
+      const fertileDates = [];
+
+      let fertileDate =
+        predictedFertileStart;
+
+      while (
+        fertileDate.isBefore(
+          predictedFertileEnd,
+          "day"
+        ) ||
+        fertileDate.isSame(
+          predictedFertileEnd,
+          "day"
+        )
+      ) {
+        if (
+          !fertileDate.isBefore(rangeStart, "day") &&
+          !fertileDate.isAfter(rangeEnd, "day")
+        ) {
+          fertileDates.push(
+            fertileDate.format("YYYY-MM-DD")
+          );
+        }
+
+        fertileDate =
+          fertileDate.add(1, "day");
+      }
+
+      const pmsDates = [];
+
+      let pmsDate = predictedPmsStart;
+
+      while (
+        pmsDate.isBefore(predictedPmsEnd, "day") ||
+        pmsDate.isSame(predictedPmsEnd, "day")
+      ) {
+        if (
+          !pmsDate.isBefore(rangeStart, "day") &&
+          !pmsDate.isAfter(rangeEnd, "day")
+        ) {
+          pmsDates.push(
+            pmsDate.format("YYYY-MM-DD")
+          );
+        }
+
+        pmsDate = pmsDate.add(1, "day");
+      }
+
+      predictedCycles.push({
+        predictionIndex,
+
+        cycleStartDate:
+          cycleStart.format("YYYY-MM-DD"),
+
+        cycleLength,
+        bleedingDays,
+
+        periodDates,
+
+        fertileWindow: {
+          startDate:
+            predictedFertileStart.format(
+              "YYYY-MM-DD"
+            ),
+
+          endDate:
+            predictedFertileEnd.format(
+              "YYYY-MM-DD"
+            ),
+
+          dates: fertileDates
+        },
+
+        ovulationDate:
+          predictedOvulation.format(
+            "YYYY-MM-DD"
+          ),
+
+        pmsWindow: {
+          startDate:
+            predictedPmsStart.format(
+              "YYYY-MM-DD"
+            ),
+
+          endDate:
+            predictedPmsEnd.format(
+              "YYYY-MM-DD"
+            ),
+
+          dates: pmsDates
+        },
+
+        nextPeriodDate:
+          predictedNextPeriod.format(
+            "YYYY-MM-DD"
+          ),
+
+        position:
+          cycleStart.isBefore(today, "day")
+            ? "past"
+            : cycleStart.isSame(
+                effectiveCycleStart,
+                "day"
+              )
+              ? "current"
+              : "future"
+      });
+
+      cycleStart =
+        cycleStart.add(cycleLength, "day");
+
+      predictionIndex++;
+    }
+
+    // ---------------------------------------------------------
+    // 9. Fetch health logs and planner ranges
+    // ---------------------------------------------------------
+
+    const [healthLogsResult, plannerResult] =
+      await Promise.all([
+        db.query(
+          `
+          SELECT
+            id,
+            log_date,
+            log_data,
+            created_at,
+            updated_at
+          FROM daily_health_logs
+          WHERE user_id = $1
+            AND log_date BETWEEN $2::date AND $3::date
+          ORDER BY log_date ASC
+          `,
+          [
+            userId,
+            rangeStart.format("YYYY-MM-DD"),
+            rangeEnd.format("YYYY-MM-DD")
+          ]
+        ),
+
+        db.query(
+          `
+          SELECT
+            id,
+            start_date,
+            end_date,
+            purpose,
+            activity,
+            ai_insights,
+            created_at,
+            updated_at
+          FROM cycle_trip_planner_insights
+          WHERE user_id = $1
+            AND start_date <= $3::date
+            AND end_date >= $2::date
+          ORDER BY start_date ASC, created_at DESC
+          `,
+          [
+            userId,
+            rangeStart.format("YYYY-MM-DD"),
+            rangeEnd.format("YYYY-MM-DD")
+          ]
+        )
+      ]);
+
+    const healthLogDates =
+      healthLogsResult.rows.map((row) => ({
+        id: row.id,
+
+        date: dayjs(row.log_date)
+          .format("YYYY-MM-DD"),
+
+        logData: row.log_data,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      }));
+
+    /*
+     * Expand each planner range so every planner day
+     * can be marked on the calendar.
+     */
+    const plannerDates = [];
+
+    for (const planner of plannerResult.rows) {
+      const plannerStart =
+        dayjs(planner.start_date).startOf("day");
+
+      const plannerEnd =
+        dayjs(planner.end_date).startOf("day");
+
+      let plannerDate = plannerStart;
+
+      while (
+        plannerDate.isBefore(plannerEnd, "day") ||
+        plannerDate.isSame(plannerEnd, "day")
+      ) {
+        if (
+          !plannerDate.isBefore(rangeStart, "day") &&
+          !plannerDate.isAfter(rangeEnd, "day")
+        ) {
+          plannerDates.push({
+            plannerId: planner.id,
+
+            date:
+              plannerDate.format("YYYY-MM-DD"),
+
+            startDate:
+              plannerStart.format("YYYY-MM-DD"),
+
+            endDate:
+              plannerEnd.format("YYYY-MM-DD"),
+
+            purpose: planner.purpose,
+            activity: planner.activity,
+
+            isStartDate:
+              plannerDate.isSame(
+                plannerStart,
+                "day"
+              ),
+
+            isEndDate:
+              plannerDate.isSame(
+                plannerEnd,
+                "day"
+              ),
+
+            aiInsights: planner.ai_insights
+          });
+        }
+
+        plannerDate =
+          plannerDate.add(1, "day");
+      }
+    }
+
+    // ---------------------------------------------------------
+    // 10. Create one combined calendar-day map
+    // ---------------------------------------------------------
+
+    const calendarMap = {};
+
+    const getCalendarDay = (date) => {
+      if (!calendarMap[date]) {
+        calendarMap[date] = {
+          date,
+          month: date.slice(0, 7),
+
+          cycleMarks: {
+            confirmedPeriod: false,
+            predictedPeriod: false,
+            fertile: false,
+            ovulation: false,
+            pms: false
+          },
+
+          cycleDetails: [],
+          healthLogs: [],
+          planners: []
+        };
+      }
+
+      return calendarMap[date];
+    };
+
+    /*
+     * Confirmed period data has priority over prediction.
+     */
+    for (const item of confirmedPeriods) {
+      const calendarDay =
+        getCalendarDay(item.date);
+
+      if (item.type === "period") {
+        calendarDay.cycleMarks.confirmedPeriod =
+          true;
+      }
+
+      if (item.type === "ovulation") {
+        calendarDay.cycleMarks.ovulation =
+          true;
+      }
+
+      calendarDay.cycleDetails.push(item);
+    }
+
+    for (const cycle of predictedCycles) {
+      for (const date of cycle.periodDates) {
+        const calendarDay =
+          getCalendarDay(date);
+
+        calendarDay.cycleMarks.predictedPeriod =
+          true;
+
+        calendarDay.cycleDetails.push({
+          type: "period",
+          status: "predicted",
+          cycleStartDate:
+            cycle.cycleStartDate
+        });
+      }
+
+      for (
+        const date of cycle.fertileWindow.dates
+      ) {
+        const calendarDay =
+          getCalendarDay(date);
+
+        calendarDay.cycleMarks.fertile = true;
+
+        calendarDay.cycleDetails.push({
+          type: "fertile",
+          status: "predicted",
+          cycleStartDate:
+            cycle.cycleStartDate
+        });
+      }
+
+      if (
+        !dayjs(cycle.ovulationDate).isBefore(
+          rangeStart,
+          "day"
+        ) &&
+        !dayjs(cycle.ovulationDate).isAfter(
+          rangeEnd,
+          "day"
+        )
+      ) {
+        const calendarDay =
+          getCalendarDay(
+            cycle.ovulationDate
+          );
+
+        calendarDay.cycleMarks.ovulation =
+          true;
+
+        calendarDay.cycleDetails.push({
+          type: "ovulation",
+          status: "predicted",
+          cycleStartDate:
+            cycle.cycleStartDate
+        });
+      }
+
+      for (const date of cycle.pmsWindow.dates) {
+        const calendarDay =
+          getCalendarDay(date);
+
+        calendarDay.cycleMarks.pms = true;
+
+        calendarDay.cycleDetails.push({
+          type: "pms",
+          status: "predicted",
+          cycleStartDate:
+            cycle.cycleStartDate
+        });
+      }
+    }
+
+    for (const healthLog of healthLogDates) {
+      getCalendarDay(
+        healthLog.date
+      ).healthLogs.push(healthLog);
+    }
+
+    for (const planner of plannerDates) {
+      getCalendarDay(
+        planner.date
+      ).planners.push(planner);
+    }
+
+    const calendarDays = Object.values(
+      calendarMap
+    ).sort(
+      (first, second) =>
+        first.date.localeCompare(second.date)
+    );
+
+    // ---------------------------------------------------------
+    // 11. Group everything month-wise
+    // ---------------------------------------------------------
+
+    const months = {};
+
+    let monthCursor =
+      rangeStart.startOf("month");
+
+    while (
+      monthCursor.isBefore(rangeEnd, "month") ||
+      monthCursor.isSame(rangeEnd, "month")
+    ) {
+      const monthKey =
+        monthCursor.format("YYYY-MM");
+
+      months[monthKey] = {
+        month: monthKey,
+        periodDates: [],
+        confirmedPeriodDates: [],
+        predictedPeriodDates: [],
+        fertileDates: [],
+        ovulationDates: [],
+        pmsDates: [],
+        healthLogDates: [],
+        plannerDates: [],
+        days: []
+      };
+
+      monthCursor =
+        monthCursor.add(1, "month");
+    }
+
+    for (const day of calendarDays) {
+      const monthData = months[day.month];
+
+      if (!monthData) {
+        continue;
+      }
+
+      if (
+        day.cycleMarks.confirmedPeriod ||
+        day.cycleMarks.predictedPeriod
+      ) {
+        monthData.periodDates.push(day.date);
+      }
+
+      if (day.cycleMarks.confirmedPeriod) {
+        monthData.confirmedPeriodDates.push(
+          day.date
+        );
+      }
+
+      if (
+        day.cycleMarks.predictedPeriod &&
+        !day.cycleMarks.confirmedPeriod
+      ) {
+        monthData.predictedPeriodDates.push(
+          day.date
+        );
+      }
+
+      if (day.cycleMarks.fertile) {
+        monthData.fertileDates.push(day.date);
+      }
+
+      if (day.cycleMarks.ovulation) {
+        monthData.ovulationDates.push(day.date);
+      }
+
+      if (day.cycleMarks.pms) {
+        monthData.pmsDates.push(day.date);
+      }
+
+      if (day.healthLogs.length > 0) {
+        monthData.healthLogDates.push({
+          date: day.date,
+          logs: day.healthLogs
+        });
+      }
+
+      if (day.planners.length > 0) {
+        monthData.plannerDates.push({
+          date: day.date,
+          planners: day.planners
+        });
+      }
+
+      monthData.days.push(day);
+    }
+
+    const selectedMonthData =
+      month && months[month]
+        ? months[month]
+        : null;
+
+    // ---------------------------------------------------------
+    // 12. Final response
+    // ---------------------------------------------------------
+
+    return res.json({
+      success: true,
+
+      data: {
+        range: {
+          startDate:
+            rangeStart.format("YYYY-MM-DD"),
+
+          endDate:
+            rangeEnd.format("YYYY-MM-DD"),
+
+          previousMonths: 6,
+          futureMonths: 12
+        },
+
+        cycleSummary: {
+          lastPeriodDate:
+            lastPeriod.format("YYYY-MM-DD"),
+
+          effectiveCycleStart:
+            effectiveCycleStart.format(
+              "YYYY-MM-DD"
+            ),
+
+          bleedingDays,
+          cycleLength,
+
+          ovulationDate:
+            ovulation.format("YYYY-MM-DD"),
+
+          fertileWindow: {
+            startDate:
+              fertileStart.format(
+                "YYYY-MM-DD"
+              ),
+
+            endDate:
+              fertileEnd.format(
+                "YYYY-MM-DD"
+              )
+          },
+
+          nextPeriodDate:
+            nextPeriod.format("YYYY-MM-DD"),
+
+          pmsWindow: {
+            startDate:
+              pmsStart.format("YYYY-MM-DD"),
+
+            endDate:
+              pmsEnd.format("YYYY-MM-DD")
+          },
+
+          daysUntilNextPeriod,
+          fertilityLevel,
+          isOverdue
+        },
+
+        statistics: {
+          averageCycleLength: cycleLength,
+          regularity,
+          regularityScore,
+          totalCyclesTracked:
+            history.length
+        },
+
+        history,
+
+        confirmedPeriods,
+        predictedCycles,
+
+        healthLogDates,
+        plannerDates,
+
+        calendarDays,
+
+        months: Object.values(months),
+
+        selectedMonthData
+      }
+    });
+  } catch (error) {
+    console.error(
+      "getCycleCalendarDetails error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        "Failed to fetch cycle calendar details",
+
+      error:
+        process.env.NODE_ENV === "development"
+          ? error.message
+          : undefined
+    });
+  }
 };
