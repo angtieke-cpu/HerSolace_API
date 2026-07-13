@@ -12,6 +12,7 @@ const { updateUserSettings } = require("../controllers/user.controller");
 const { createUserDeleteRequest } = require("../controllers/user.controller"); 
 const { updateProfileLinkRequest } = require("../controllers/user.controller");
 const { getHomeNotifications } = require("../controllers/user.controller"); 
+const { getUserSymptomConfiguration } = require("../controllers/user.controller"); 
 
 
 router.post("/user-details", authenticate, updateUserProfile);
@@ -24,6 +25,7 @@ router.post("/unlink-user", authenticate, deleteLinkedUser);
 router.post("/user-settings", authenticate, updateUserSettings);
 router.post("/user-delete-request", authenticate, createUserDeleteRequest);
 router.get("/user-notifications", authenticate, getHomeNotifications);
+router.get("/user-config", authenticate, getHomeNotifications);
 router.put("/link-user", authenticate, updateProfileLinkRequest);
 
 module.exports = router;
