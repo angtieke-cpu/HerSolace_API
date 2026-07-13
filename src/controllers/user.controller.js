@@ -1147,15 +1147,13 @@ exports.getEnabledUserSymptoms = async (req, res) => {
     });
   }
 };
+
 exports.saveUserSymptomConfiguration = async (req, res) => {
   const client = await db.connect();
 
   try {
     const userId = req.user?.userId;
-
-    const {
-      selectedSymptomIds = []
-    } = req.body;
+    const { symptoms } = req.body;
 
     if (!userId) {
       return res.status(400).json({
@@ -1164,73 +1162,160 @@ exports.saveUserSymptomConfiguration = async (req, res) => {
       });
     }
 
-    if (!Array.isArray(selectedSymptomIds)) {
+    if (!Array.isArray(symptoms)) {
       return res.status(400).json({
         success: false,
-        message:
-          "selectedSymptomIds must be an array"
+        message: "symptoms must be an array"
       });
     }
 
-    const uniqueIds = [
-      ...new Set(
-        selectedSymptomIds
-          .map((id) => String(id).trim())
-          .filter(Boolean)
-      )
-    ];
+    if (symptoms.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one symptom is required"
+      });
+    }
 
     /*
-     * Validate selected IDs.
-     * Only active optional symptoms can be submitted.
+     * Validate request object structure.
      */
-    if (uniqueIds.length > 0) {
-      const validResult =
-        await client.query(
-          `
-          SELECT id
-          FROM symptom_config
-          WHERE id = ANY($1::uuid[])
-            AND requirement = 'Optional'
-            AND is_active = true
-          `,
-          [uniqueIds]
-        );
+    const invalidItems = symptoms.filter(
+      (item) =>
+        !item ||
+        !item.symptomId ||
+        typeof item.isSelected !== "boolean"
+    );
 
-      const validIds =
-        validResult.rows.map((row) =>
-          String(row.id)
-        );
+    if (invalidItems.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Each symptom must contain symptomId and boolean isSelected"
+      });
+    }
 
-      const invalidIds =
-        uniqueIds.filter(
-          (id) => !validIds.includes(id)
-        );
+    /*
+     * Remove duplicate symptom IDs.
+     * When the same ID is supplied more than once,
+     * the last value is used.
+     */
+    const symptomsMap = new Map();
 
-      if (invalidIds.length > 0) {
+    for (const item of symptoms) {
+      const symptomId = String(
+        item.symptomId
+      ).trim();
+
+      if (!symptomId) {
         return res.status(400).json({
           success: false,
-
-          message:
-            "One or more symptom IDs are invalid, inactive, or mandatory",
-
-          invalidSymptomIds:
-            invalidIds
+          message: "Invalid symptomId"
         });
       }
+
+      symptomsMap.set(symptomId, {
+        symptomId,
+        isSelected: item.isSelected
+      });
+    }
+
+    const uniqueSymptoms = Array.from(
+      symptomsMap.values()
+    );
+
+    const symptomIds = uniqueSymptoms.map(
+      (item) => item.symptomId
+    );
+
+    const selectedValues = uniqueSymptoms.map(
+      (item) => item.isSelected
+    );
+
+    /*
+     * Validate all IDs before updating.
+     *
+     * Only active optional symptoms can be modified.
+     * Mandatory symptoms cannot be changed.
+     */
+    const validResult = await client.query(
+      `
+      SELECT
+        id,
+        symptom,
+        requirement,
+        is_active
+      FROM symptom_config
+      WHERE id = ANY($1::uuid[])
+      `,
+      [symptomIds]
+    );
+
+    const existingIds = new Set(
+      validResult.rows.map((row) =>
+        String(row.id)
+      )
+    );
+
+    const invalidSymptomIds =
+      symptomIds.filter(
+        (id) => !existingIds.has(id)
+      );
+
+    if (invalidSymptomIds.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "One or more symptom IDs do not exist",
+        invalidSymptomIds
+      });
+    }
+
+    const inactiveSymptoms =
+      validResult.rows.filter(
+        (row) => !row.is_active
+      );
+
+    if (inactiveSymptoms.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Inactive symptoms cannot be updated",
+        inactiveSymptoms:
+          inactiveSymptoms.map((row) => ({
+            symptomId: row.id,
+            symptom: row.symptom
+          }))
+      });
+    }
+
+    const mandatorySymptoms =
+      validResult.rows.filter(
+        (row) =>
+          row.requirement === "Mandatory"
+      );
+
+    if (mandatorySymptoms.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Mandatory symptoms cannot be changed",
+        mandatorySymptoms:
+          mandatorySymptoms.map((row) => ({
+            symptomId: row.id,
+            symptom: row.symptom
+          }))
+      });
     }
 
     await client.query("BEGIN");
 
     /*
-     * Step 1:
-     * Create/update preference rows for every active
-     * optional symptom belonging to this user.
+     * Insert or update all provided symptoms.
      *
-     * Selected IDs become true.
-     * All other optional symptoms become false.
+     * This only changes the symptoms included in the request.
+     * Other user preferences remain unchanged.
      */
-    await client.query(
+    const updateResult = await client.query(
       `
       INSERT INTO user_symptom_preferences (
         user_id,
@@ -1242,21 +1327,18 @@ exports.saveUserSymptomConfiguration = async (req, res) => {
 
       SELECT
         $1,
-        sc.id,
-
-        CASE
-          WHEN sc.id = ANY($2::uuid[])
-            THEN true
-          ELSE false
-        END,
-
+        symptom_data.symptom_id,
+        symptom_data.is_selected,
         CURRENT_TIMESTAMP,
         CURRENT_TIMESTAMP
 
-      FROM symptom_config sc
-
-      WHERE sc.requirement = 'Optional'
-        AND sc.is_active = true
+      FROM UNNEST(
+        $2::uuid[],
+        $3::boolean[]
+      ) AS symptom_data(
+        symptom_id,
+        is_selected
+      )
 
       ON CONFLICT (
         user_id,
@@ -1269,24 +1351,56 @@ exports.saveUserSymptomConfiguration = async (req, res) => {
 
         updated_at =
           CURRENT_TIMESTAMP
+
+      RETURNING
+        symptom_config_id,
+        is_selected,
+        created_at,
+        updated_at
       `,
-      [userId, uniqueIds]
+      [
+        userId,
+        symptomIds,
+        selectedValues
+      ]
     );
 
     await client.query("COMMIT");
 
+    const selectedCount =
+      updateResult.rows.filter(
+        (row) => row.is_selected
+      ).length;
+
+    const unselectedCount =
+      updateResult.rows.filter(
+        (row) => !row.is_selected
+      ).length;
+
     return res.json({
       success: true,
-
       message:
         "Symptom configuration saved successfully",
 
       data: {
-        selectedOptionalCount:
-          uniqueIds.length,
+        updatedCount:
+          updateResult.rows.length,
 
-        selectedSymptomIds:
-          uniqueIds
+        selectedCount,
+
+        unselectedCount,
+
+        symptoms:
+          updateResult.rows.map((row) => ({
+            symptomId:
+              row.symptom_config_id,
+
+            isSelected:
+              row.is_selected,
+
+            updatedAt:
+              row.updated_at
+          }))
       }
     });
   } catch (error) {
@@ -1307,7 +1421,13 @@ exports.saveUserSymptomConfiguration = async (req, res) => {
     return res.status(500).json({
       success: false,
       message:
-        "Failed to save symptom configuration"
+        "Failed to save symptom configuration",
+
+      error:
+        process.env.NODE_ENV ===
+        "development"
+          ? error.message
+          : undefined
     });
   } finally {
     client.release();
