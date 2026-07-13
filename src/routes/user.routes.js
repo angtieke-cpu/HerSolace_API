@@ -25,7 +25,7 @@ router.post("/unlink-user", authenticate, deleteLinkedUser);
 router.post("/user-settings", authenticate, updateUserSettings);
 router.post("/user-delete-request", authenticate, createUserDeleteRequest);
 router.get("/user-notifications", authenticate, getHomeNotifications);
-router.get("/user-config", authenticate, getHomeNotifications);
+router.get("/user-config", authenticate, getUserSymptomConfiguration);
 router.put("/link-user", authenticate, updateProfileLinkRequest);
 
 module.exports = router;
