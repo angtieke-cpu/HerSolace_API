@@ -1023,3 +1023,127 @@ exports.getUserSymptomConfiguration = async (req, res) => {
     });
   }
 };
+
+exports.getEnabledUserSymptoms = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "userid required"
+      });
+    }
+
+    const result = await db.query(
+      `
+      SELECT
+        sc.id,
+        sc.source_sheet,
+        sc.phase,
+        sc.category,
+        sc.symptom,
+        sc.priority,
+        sc.requirement,
+
+        CASE
+          WHEN sc.requirement = 'Mandatory'
+            THEN true
+          ELSE COALESCE(
+            usp.is_selected,
+            false
+          )
+        END AS is_selected
+
+      FROM symptom_config sc
+
+      LEFT JOIN user_symptom_preferences usp
+        ON usp.symptom_config_id = sc.id
+       AND usp.user_id = $1
+
+      WHERE sc.is_active = true
+
+        AND (
+          sc.requirement = 'Mandatory'
+
+          OR COALESCE(
+            usp.is_selected,
+            false
+          ) = true
+        )
+
+      ORDER BY
+        sc.phase NULLS LAST,
+        sc.category NULLS LAST,
+
+        CASE
+          WHEN sc.requirement = 'Mandatory'
+            THEN 1
+          ELSE 2
+        END,
+
+        sc.priority NULLS LAST,
+        sc.symptom ASC
+      `,
+      [userId]
+    );
+
+    const symptoms =
+      result.rows.map((row) => ({
+        id: row.id,
+        sourceSheet: row.source_sheet,
+        phase: row.phase,
+        category: row.category,
+        symptom: row.symptom,
+        priority: row.priority,
+        requirement: row.requirement,
+        isMandatory:
+          row.requirement === "Mandatory",
+        isSelected: true
+      }));
+
+    const groupedByPhase =
+      symptoms.reduce(
+        (groups, symptom) => {
+          const phase =
+            symptom.phase || "General";
+
+          if (!groups[phase]) {
+            groups[phase] = [];
+          }
+
+          groups[phase].push(symptom);
+
+          return groups;
+        },
+        {}
+      );
+
+    return res.json({
+      success: true,
+
+      data: {
+        count: symptoms.length,
+        symptoms,
+
+        groupedByPhase:
+          Object.entries(groupedByPhase)
+            .map(([phase, items]) => ({
+              phase,
+              symptoms: items
+            }))
+      }
+    });
+  } catch (error) {
+    console.error(
+      "getEnabledUserSymptoms error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        "Failed to fetch enabled symptoms"
+    });
+  }
+};
