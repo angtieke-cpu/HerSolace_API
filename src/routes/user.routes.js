@@ -14,6 +14,7 @@ const { updateProfileLinkRequest } = require("../controllers/user.controller");
 const { getHomeNotifications } = require("../controllers/user.controller"); 
 const { getUserSymptomConfiguration } = require("../controllers/user.controller"); 
 const { getEnabledUserSymptoms } = require("../controllers/user.controller"); 
+const { saveUserSymptomConfiguration } = require("../controllers/user.controller"); 
 
 
 router.post("/user-details", authenticate, updateUserProfile);
@@ -29,5 +30,6 @@ router.get("/user-notifications", authenticate, getHomeNotifications);
 router.get("/user-config", authenticate, getUserSymptomConfiguration);
 router.get("/user-enabled-config", authenticate, getEnabledUserSymptoms);
 router.put("/link-user", authenticate, updateProfileLinkRequest);
+router.post("/user-config", authenticate, updateProfileLinkRequest);
 
 module.exports = router;
