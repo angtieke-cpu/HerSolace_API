@@ -370,465 +370,697 @@ Instructions:
 };
 
 exports.getCycleTripPlannerInsights = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
 
-    try {
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "userid required"
+      });
+    }
 
+    const {
+      startDate,
+      endDate,
+      purpose = "Travel",
+      activity = "General"
+    } = req.body;
 
-        const userId = req.user.userId;
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "startDate and endDate are required"
+      });
+    }
 
+    const requestedStart = dayjs(startDate).startOf("day");
+    const requestedEnd = dayjs(endDate).startOf("day");
 
-        if (!userId) {
+    if (!requestedStart.isValid() || !requestedEnd.isValid()) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid startDate or endDate"
+      });
+    }
 
-            return res.status(400).json({
-                message: "userid required"
-            });
+    if (requestedEnd.isBefore(requestedStart, "day")) {
+      return res.status(400).json({
+        success: false,
+        message: "endDate cannot be before startDate"
+      });
+    }
 
-        }
+    const formattedStartDate =
+      requestedStart.format("YYYY-MM-DD");
 
+    const formattedEndDate =
+      requestedEnd.format("YYYY-MM-DD");
 
+    const normalizedPurpose =
+      String(purpose || "Travel").trim() || "Travel";
 
-        const {
-            startDate,
-            endDate,
-            purpose,
-            activity
-        } = req.body;
+    const normalizedActivity =
+      String(activity || "General").trim() || "General";
 
+    /*
+     * Local helper: calculate cycle day for any date.
+     */
+    const calculateCycleDay = (
+      selectedDate,
+      latestPeriodDate,
+      cycleLength
+    ) => {
+      const selected = dayjs(selectedDate).startOf("day");
+      const latest = dayjs(latestPeriodDate).startOf("day");
 
+      const difference = selected.diff(latest, "day");
 
+      const normalizedDifference =
+        ((difference % cycleLength) + cycleLength) %
+        cycleLength;
 
-        if (!startDate || !endDate) {
+      return normalizedDifference + 1;
+    };
 
-            return res.status(400).json({
-                message: "Trip dates required"
-            });
+    /*
+     * Local helper: determine phase.
+     */
+    const calculatePhase = (
+      cycleDay,
+      cycleLength,
+      bleedingDays
+    ) => {
+      const ovulationCycleDay = cycleLength - 14;
 
-        }
+      if (cycleDay <= bleedingDays) {
+        return "Menstrual";
+      }
 
+      if (cycleDay < ovulationCycleDay) {
+        return "Follicular";
+      }
 
+      if (cycleDay === ovulationCycleDay) {
+        return "Ovulation";
+      }
 
+      return "Luteal";
+    };
 
-        // --------------------------------
-        // Get complete cycle history
-        // --------------------------------
+    /*
+     * Local helper: generate day-wise information.
+     */
+    const generateDayWiseAnalysis = ({
+      rangeStart,
+      rangeEnd,
+      latestPeriodDate,
+      cycleLength,
+      bleedingDays,
+      plannerStartDate
+    }) => {
+      const dayWiseAnalysis = [];
 
+      let currentDate = dayjs(rangeStart).startOf("day");
+      const finalDate = dayjs(rangeEnd).startOf("day");
 
-        const result = await db.query(
-            `
-SELECT
- id,
- period_date,
- bleeding_days,
- cycle_length
-FROM user_period_log
-WHERE user_id=$1
-ORDER BY period_date ASC
-`,
-            [userId]
+      const ovulationCycleDay = cycleLength - 14;
+      const fertileStartCycleDay =
+        ovulationCycleDay - 5;
+      const fertileEndCycleDay =
+        ovulationCycleDay + 1;
+
+      while (
+        currentDate.isBefore(finalDate, "day") ||
+        currentDate.isSame(finalDate, "day")
+      ) {
+        const cycleDay = calculateCycleDay(
+          currentDate,
+          latestPeriodDate,
+          cycleLength
         );
 
+        const phase = calculatePhase(
+          cycleDay,
+          cycleLength,
+          bleedingDays
+        );
 
+        const isPeriodDay =
+          cycleDay <= bleedingDays;
 
-        if (result.rows.length === 0) {
+        const isOvulationDay =
+          cycleDay === ovulationCycleDay;
 
-            return res.status(404).json({
-                message: "No cycle data found"
-            });
+        const isFertileDay =
+          cycleDay >= fertileStartCycleDay &&
+          cycleDay <= fertileEndCycleDay;
 
+        const isPmsDay =
+          cycleDay >= cycleLength - 4 &&
+          cycleDay <= cycleLength;
+
+        const tripDay =
+          currentDate.diff(
+            dayjs(plannerStartDate).startOf("day"),
+            "day"
+          ) + 1;
+
+        dayWiseAnalysis.push({
+          date: currentDate.format("YYYY-MM-DD"),
+          cycleDay,
+          phase,
+          tripDay,
+          isPeriodDay,
+          isOvulationDay,
+          isFertileDay,
+          isPmsDay,
+          isRequestedStartDate: currentDate.isSame(
+            requestedStart,
+            "day"
+          ),
+          isRequestedEndDate: currentDate.isSame(
+            requestedEnd,
+            "day"
+          )
+        });
+
+        currentDate = currentDate.add(1, "day");
+      }
+
+      return dayWiseAnalysis;
+    };
+
+    /*
+     * FLOW 1:
+     * Check whether the selected range is already covered
+     * by an existing saved planner.
+     *
+     * Examples:
+     *
+     * Saved:    July 10 to July 20
+     * Requested July 15              -> existing
+     * Requested July 13 to July 17   -> existing
+     * Requested July 10 to July 20   -> exact
+     * Requested July 18 to July 25   -> new AI call
+     */
+    const existingPlannerResult = await db.query(
+      `
+      SELECT
+        id,
+        start_date,
+        end_date,
+        purpose,
+        activity,
+        latest_period_date,
+        cycle_length,
+        bleeding_days,
+        ai_insights,
+        created_at,
+        updated_at,
+
+        CASE
+          WHEN start_date = $2::date
+           AND end_date = $3::date
+          THEN true
+          ELSE false
+        END AS is_exact_match
+
+      FROM cycle_trip_planner_insights
+
+      WHERE user_id = $1
+        AND start_date <= $2::date
+        AND end_date >= $3::date
+
+      ORDER BY
+        is_exact_match DESC,
+        (end_date - start_date) ASC,
+        created_at DESC
+
+      LIMIT 1
+      `,
+      [
+        userId,
+        formattedStartDate,
+        formattedEndDate
+      ]
+    );
+
+    /*
+     * Existing exact date or inside existing date range.
+     * AI is not called.
+     */
+    if (existingPlannerResult.rows.length > 0) {
+      const savedPlanner =
+        existingPlannerResult.rows[0];
+
+      const cycleLength =
+        Number(savedPlanner.cycle_length) || 28;
+
+      const bleedingDays =
+        Number(savedPlanner.bleeding_days) || 5;
+
+      const dayWiseAnalysis =
+        generateDayWiseAnalysis({
+          rangeStart: requestedStart,
+          rangeEnd: requestedEnd,
+          latestPeriodDate:
+            savedPlanner.latest_period_date,
+          cycleLength,
+          bleedingDays,
+          plannerStartDate: savedPlanner.start_date
+        });
+
+      return res.json({
+        success: true,
+        aiGenerated: false,
+        source: "database",
+
+        matchType: savedPlanner.is_exact_match
+          ? "exact_match"
+          : "inside_existing_planner",
+
+        message: savedPlanner.is_exact_match
+          ? "Existing planner retrieved"
+          : "Requested date is covered by an existing planner",
+
+        data: {
+          plannerId: savedPlanner.id,
+
+          savedPlanner: {
+            startDate: savedPlanner.start_date,
+            endDate: savedPlanner.end_date,
+            purpose: savedPlanner.purpose,
+            activity: savedPlanner.activity
+          },
+
+          requestedPlanner: {
+            startDate: formattedStartDate,
+            endDate: formattedEndDate,
+            purpose: normalizedPurpose,
+            activity: normalizedActivity
+          },
+
+          cycleAnalysis: {
+            latestPeriodDate:
+              savedPlanner.latest_period_date,
+            cycleLength,
+            bleedingDays
+          },
+
+          dayWiseAnalysis,
+
+          aiInsights: savedPlanner.ai_insights,
+
+          createdAt: savedPlanner.created_at,
+          updatedAt: savedPlanner.updated_at
         }
+      });
+    }
 
+    /*
+     * FLOW 2:
+     * No saved planner covers the requested range.
+     * Retrieve cycle history.
+     */
+    const historyResult = await db.query(
+      `
+      SELECT
+        id,
+        period_date,
+        bleeding_days,
+        cycle_length
+      FROM user_period_log
+      WHERE user_id = $1
+      ORDER BY period_date ASC
+      `,
+      [userId]
+    );
 
+    if (historyResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No cycle data found"
+      });
+    }
 
+    const history = historyResult.rows;
 
+    /*
+     * Calculate average cycle length.
+     */
+    let cycleLength = 28;
 
-        const history = result.rows;
+    if (history.length > 1) {
+      let totalDays = 0;
+      let validCycleCount = 0;
 
+      for (let index = 1; index < history.length; index++) {
+        const difference = dayjs(
+          history[index].period_date
+        ).diff(
+          dayjs(history[index - 1].period_date),
+          "day"
+        );
 
-
-
-        // --------------------------------
-        // Calculate average cycle
-        // --------------------------------
-
-
-        let cycleLength = 28;
-
-
-        if (history.length > 1) {
-
-
-            let total = 0;
-
-
-            for (let i = 1; i < history.length; i++) {
-
-                total += dayjs(
-                    history[i].period_date
-                )
-                    .diff(
-                        dayjs(history[i - 1].period_date),
-                        "day"
-                    );
-
-            }
-
-
-            cycleLength =
-                Math.round(
-                    total / (history.length - 1)
-                );
-
-
+        /*
+         * Ignore clearly incorrect cycle gaps.
+         */
+        if (difference >= 15 && difference <= 60) {
+          totalDays += difference;
+          validCycleCount++;
         }
-        else {
-
-            cycleLength =
-                history[0].cycle_length || 28;
-
-        }
-
-
-
-
-
-        const latest =
-            dayjs(
-                history[history.length - 1].period_date
-            );
-
-
-
-        const bleedingDays =
-            history[history.length - 1].bleeding_days || 5;
-
-
-
-
-
-        // --------------------------------
-        // Trip cycle position
-        // --------------------------------
-
-
-        const tripStart =
-            dayjs(startDate);
-
-
-
-        const daysFromLastPeriod =
-            tripStart.diff(
-                latest,
-                "day"
-            ) + 1;
-
-
-
-        const cycleDay =
-            ((daysFromLastPeriod - 1)
-                %
-                cycleLength) + 1;
-
-
-
-
-
-        let phase = "";
-
-
-        if (cycleDay <= bleedingDays) {
-
-            phase = "Menstrual";
-
-        }
-        else if (cycleDay <= 13) {
-
-            phase = "Follicular";
-
-        }
-        else if (cycleDay === 14) {
-
-            phase = "Ovulation";
-
-        }
-        else {
-
-            phase = "Luteal";
-
-        }
-
-
-
-
-
-
-
-        // --------------------------------
-        // Prediction dates
-        // --------------------------------
-
-
-        const ovulationDay =
-            latest.add(
-                cycleLength - 14,
-                "day"
-            );
-
-
-
-        const fertileStart =
-            ovulationDay.subtract(
-                5,
-                "day"
-            );
-
-
-
-        const nextPeriod =
-            latest.add(
-                cycleLength,
-                "day"
-            );
-
-
-
-
-        const pmsStart =
-            nextPeriod.subtract(
-                5,
-                "day"
-            );
-
-
-
-
-        const pmsEnd =
-            nextPeriod.subtract(
-                1,
-                "day"
-            );
-
-
-
-
-
-
-        // --------------------------------
-        // AI Prompt
-        // --------------------------------
-
-
-
-        const prompt = `
-
+      }
+
+      if (validCycleCount > 0) {
+        cycleLength = Math.round(
+          totalDays / validCycleCount
+        );
+      } else {
+        cycleLength =
+          Number(
+            history[history.length - 1].cycle_length
+          ) || 28;
+      }
+    } else {
+      cycleLength =
+        Number(history[0].cycle_length) || 28;
+    }
+
+    const latestLog =
+      history[history.length - 1];
+
+    const latestPeriodDate = dayjs(
+      latestLog.period_date
+    ).startOf("day");
+
+    const bleedingDays =
+      Number(latestLog.bleeding_days) || 5;
+
+    /*
+     * Calculate effective cycle containing the requested
+     * start date.
+     */
+    const daysFromLatestPeriod =
+      requestedStart.diff(latestPeriodDate, "day");
+
+    const completedCycles =
+      daysFromLatestPeriod >= 0
+        ? Math.floor(daysFromLatestPeriod / cycleLength)
+        : 0;
+
+    const effectiveCycleStart =
+      latestPeriodDate.add(
+        completedCycles * cycleLength,
+        "day"
+      );
+
+    const startCycleDay = calculateCycleDay(
+      requestedStart,
+      latestPeriodDate,
+      cycleLength
+    );
+
+    const startPhase = calculatePhase(
+      startCycleDay,
+      cycleLength,
+      bleedingDays
+    );
+
+    const ovulationCycleDay =
+      cycleLength - 14;
+
+    const ovulationDate =
+      effectiveCycleStart.add(
+        ovulationCycleDay - 1,
+        "day"
+      );
+
+    const fertileStart =
+      ovulationDate.subtract(5, "day");
+
+    const fertileEnd =
+      ovulationDate.add(1, "day");
+
+    const nextPeriod =
+      effectiveCycleStart.add(
+        cycleLength,
+        "day"
+      );
+
+    const pmsStart =
+      nextPeriod.subtract(5, "day");
+
+    const pmsEnd =
+      nextPeriod.subtract(1, "day");
+
+    /*
+     * Generate cycle details for every requested date.
+     */
+    const dayWiseAnalysis =
+      generateDayWiseAnalysis({
+        rangeStart: requestedStart,
+        rangeEnd: requestedEnd,
+        latestPeriodDate,
+        cycleLength,
+        bleedingDays,
+        plannerStartDate: requestedStart
+      });
+
+    /*
+     * AI is called only for a completely new date range.
+     */
+    const prompt = `
 You are a women's wellness cycle planning assistant.
 
-
-User menstrual cycle information:
-
-Cycle History:
-
+Cycle history:
 ${JSON.stringify(history, null, 2)}
-
 
 Average cycle length:
 ${cycleLength} days
 
-
 Bleeding duration:
 ${bleedingDays} days
 
+Planner details:
 
+Start date:
+${formattedStartDate}
 
-Trip/Event Details:
-
-Start Date:
-${startDate}
-
-End Date:
-${endDate}
+End date:
+${formattedEndDate}
 
 Purpose:
-${purpose || "Travel"}
+${normalizedPurpose}
 
 Activity:
-${activity || "General"}
+${normalizedActivity}
 
+Cycle position on the selected start date:
 
+Cycle day:
+${startCycleDay}
 
-Cycle position during trip:
+Cycle phase:
+${startPhase}
 
-Cycle Day:
-${cycleDay}
+Predicted ovulation:
+${ovulationDate.format("YYYY-MM-DD")}
 
-Current Phase:
-${phase}
+Predicted fertile window:
+${fertileStart.format("YYYY-MM-DD")} to ${fertileEnd.format("YYYY-MM-DD")}
 
-
-
-Important predicted dates:
-
-Ovulation:
-${ovulationDay.format("YYYY-MM-DD")}
-
-Fertile Window:
-${fertileStart.format("YYYY-MM-DD")}
-to
-${ovulationDay.format("YYYY-MM-DD")}
-
-
-Next Period:
+Predicted next period:
 ${nextPeriod.format("YYYY-MM-DD")}
 
+Predicted PMS window:
+${pmsStart.format("YYYY-MM-DD")} to ${pmsEnd.format("YYYY-MM-DD")}
 
-PMS Window:
-${pmsStart.format("YYYY-MM-DD")}
-to
-${pmsEnd.format("YYYY-MM-DD")}
+Day-wise cycle analysis:
+${JSON.stringify(dayWiseAnalysis, null, 2)}
 
+Provide practical wellness and planning guidance.
 
-
-Provide personalized travel guidance.
-
-Return JSON only:
-
+Return valid JSON only using this structure:
 
 {
- "tripSuitability":"",
- "cycleImpact":"",
- "expectedSymptoms":[],
- "travelPreparation":[],
- "recommendedActivities":[],
- "thingsToAvoid":[],
- "periodManagementTips":[],
- "bestAdvice":""
+  "tripSuitability": "",
+  "cycleImpact": "",
+  "expectedSymptoms": [],
+  "travelPreparation": [],
+  "recommendedActivities": [],
+  "thingsToAvoid": [],
+  "periodManagementTips": [],
+  "bestAdvice": ""
 }
 
-
-Consider:
-- menstrual phase
-- energy levels
-- hormonal changes
-- cramps
-- mood changes
-- fatigue
-- travel comfort
-
-Keep suggestions practical.
+Do not include markdown.
+Do not provide a medical diagnosis.
 `;
 
+    const aiResponse =
+      await openai.chat.completions.create({
+        model: "gpt-4o-mini",
 
+        messages: [
+          {
+            role: "system",
+            content:
+              "Return only valid JSON without markdown code blocks."
+          },
+          {
+            role: "user",
+            content: prompt
+          }
+        ],
 
+        temperature: 0.6,
 
+        response_format: {
+          type: "json_object"
+        }
+      });
 
-        // --------------------------------
-        // OpenAI Call
-        // --------------------------------
+    const aiContent =
+      aiResponse.choices?.[0]?.message?.content;
 
-
-        const response =
-            await openai.chat.completions.create({
-
-                model: "gpt-4o-mini",
-
-                messages: [
-                    {
-                        role: "user",
-                        content: prompt
-                    }
-                ],
-
-                temperature: 0.6
-
-            });
-
-
-
-
-
-        const output =
-            response.choices[0]
-                .message
-                .content;
-
-
-
-        const clean =
-            output.replace(
-                /```json|```/g,
-                ""
-            );
-
-
-
-        const aiResult =
-            JSON.parse(clean);
-
-
-
-
-
-        return res.json({
-
-            success: true,
-
-
-            data: {
-
-
-                trip: {
-                    startDate,
-                    endDate,
-                    purpose,
-                    activity
-                },
-
-
-                cycleAnalysis: {
-
-
-                    cycleDay,
-
-                    phase,
-
-
-                    nextPeriod:
-                        nextPeriod.format("YYYY-MM-DD"),
-
-
-                    ovulation:
-                        ovulationDay.format("YYYY-MM-DD")
-
-
-                },
-
-
-                aiInsights: aiResult
-
-
-            }
-
-
-        });
-
-
-
-    }
-    catch (error) {
-
-        console.error(
-            "Trip planner AI error:",
-            error
-        );
-
-
-        return res.status(500).json({
-
-            message:
-                "Trip planning failed"
-
-        });
-
-
+    if (!aiContent) {
+      throw new Error("AI returned an empty response");
     }
 
+    let aiInsights;
+
+    try {
+      const cleanedContent = aiContent
+        .replace(/```json/gi, "")
+        .replace(/```/g, "")
+        .trim();
+
+      aiInsights = JSON.parse(cleanedContent);
+    } catch (parseError) {
+      console.error(
+        "Invalid AI response:",
+        aiContent
+      );
+
+      throw new Error(
+        "AI returned invalid JSON"
+      );
+    }
+
+    /*
+     * Save the newly generated planner.
+     */
+    const insertResult = await db.query(
+      `
+      INSERT INTO cycle_trip_planner_insights (
+        user_id,
+        start_date,
+        end_date,
+        purpose,
+        activity,
+        latest_period_date,
+        cycle_length,
+        bleeding_days,
+        ai_insights,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7,
+        $8,
+        $9::jsonb,
+        CURRENT_TIMESTAMP,
+        CURRENT_TIMESTAMP
+      )
+      RETURNING *
+      `,
+      [
+        userId,
+        formattedStartDate,
+        formattedEndDate,
+        normalizedPurpose,
+        normalizedActivity,
+        latestPeriodDate.format("YYYY-MM-DD"),
+        cycleLength,
+        bleedingDays,
+        JSON.stringify(aiInsights)
+      ]
+    );
+
+    const savedPlanner = insertResult.rows[0];
+
+    return res.status(201).json({
+      success: true,
+      aiGenerated: true,
+      source: "ai",
+      matchType: "new_planner",
+      message:
+        "Planner insights generated and saved",
+
+      data: {
+        plannerId: savedPlanner.id,
+
+        requestedPlanner: {
+          startDate: formattedStartDate,
+          endDate: formattedEndDate,
+          purpose: normalizedPurpose,
+          activity: normalizedActivity
+        },
+
+        cycleAnalysis: {
+          latestPeriodDate:
+            latestPeriodDate.format("YYYY-MM-DD"),
+
+          effectiveCycleStart:
+            effectiveCycleStart.format("YYYY-MM-DD"),
+
+          cycleLength,
+          bleedingDays,
+          startCycleDay,
+          startPhase,
+
+          ovulation:
+            ovulationDate.format("YYYY-MM-DD"),
+
+          fertileWindow: {
+            startDate:
+              fertileStart.format("YYYY-MM-DD"),
+            endDate:
+              fertileEnd.format("YYYY-MM-DD")
+          },
+
+          nextPeriod:
+            nextPeriod.format("YYYY-MM-DD"),
+
+          pmsWindow: {
+            startDate:
+              pmsStart.format("YYYY-MM-DD"),
+            endDate:
+              pmsEnd.format("YYYY-MM-DD")
+          }
+        },
+
+        dayWiseAnalysis,
+        aiInsights
+      }
+    });
+  } catch (error) {
+    console.error(
+      "Cycle trip planner error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Trip planning failed",
+      error: "Cycle trip planner error"
+    });
+  }
 };
