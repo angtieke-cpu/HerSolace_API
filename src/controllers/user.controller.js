@@ -663,12 +663,36 @@ exports.getHomeNotifications = async (req, res) => {
   [userId]
 );
 
-   return res.json({
-  success: true,
-  periodNotifications: notifications,
+  const allNotifications = [];
 
+// Period notifications
+notifications.forEach((item) => {
+  allNotifications.push({
+    notification_type: "period",
+    created_at: item.date || new Date().toISOString(),
+    data: item
+  });
+});
+
+// Link profile requests
+linkRequestsResult.rows.forEach((item) => {
+  allNotifications.push({
+    notification_type: "link_request",
+    created_at: item.created_at,
+    data: item
+  });
+});
+
+// Sort latest first
+allNotifications.sort(
+  (a, b) => new Date(b.created_at) - new Date(a.created_at)
+);
+
+return res.json({
+  success: true,
+  totalNotifications: allNotifications.length,
   linkProfileRequestsCount: linkRequestsResult.rows.length,
-  linkProfileRequests: linkRequestsResult.rows
+  notifications: allNotifications
 });
 
   } catch (error) {
