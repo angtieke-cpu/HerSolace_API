@@ -1147,3 +1147,169 @@ exports.getEnabledUserSymptoms = async (req, res) => {
     });
   }
 };
+exports.saveUserSymptomConfiguration = async (req, res) => {
+  const client = await db.connect();
+
+  try {
+    const userId = req.user?.userId;
+
+    const {
+      selectedSymptomIds = []
+    } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "userid required"
+      });
+    }
+
+    if (!Array.isArray(selectedSymptomIds)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "selectedSymptomIds must be an array"
+      });
+    }
+
+    const uniqueIds = [
+      ...new Set(
+        selectedSymptomIds
+          .map((id) => String(id).trim())
+          .filter(Boolean)
+      )
+    ];
+
+    /*
+     * Validate selected IDs.
+     * Only active optional symptoms can be submitted.
+     */
+    if (uniqueIds.length > 0) {
+      const validResult =
+        await client.query(
+          `
+          SELECT id
+          FROM symptom_config
+          WHERE id = ANY($1::uuid[])
+            AND requirement = 'Optional'
+            AND is_active = true
+          `,
+          [uniqueIds]
+        );
+
+      const validIds =
+        validResult.rows.map((row) =>
+          String(row.id)
+        );
+
+      const invalidIds =
+        uniqueIds.filter(
+          (id) => !validIds.includes(id)
+        );
+
+      if (invalidIds.length > 0) {
+        return res.status(400).json({
+          success: false,
+
+          message:
+            "One or more symptom IDs are invalid, inactive, or mandatory",
+
+          invalidSymptomIds:
+            invalidIds
+        });
+      }
+    }
+
+    await client.query("BEGIN");
+
+    /*
+     * Step 1:
+     * Create/update preference rows for every active
+     * optional symptom belonging to this user.
+     *
+     * Selected IDs become true.
+     * All other optional symptoms become false.
+     */
+    await client.query(
+      `
+      INSERT INTO user_symptom_preferences (
+        user_id,
+        symptom_config_id,
+        is_selected,
+        created_at,
+        updated_at
+      )
+
+      SELECT
+        $1,
+        sc.id,
+
+        CASE
+          WHEN sc.id = ANY($2::uuid[])
+            THEN true
+          ELSE false
+        END,
+
+        CURRENT_TIMESTAMP,
+        CURRENT_TIMESTAMP
+
+      FROM symptom_config sc
+
+      WHERE sc.requirement = 'Optional'
+        AND sc.is_active = true
+
+      ON CONFLICT (
+        user_id,
+        symptom_config_id
+      )
+
+      DO UPDATE SET
+        is_selected =
+          EXCLUDED.is_selected,
+
+        updated_at =
+          CURRENT_TIMESTAMP
+      `,
+      [userId, uniqueIds]
+    );
+
+    await client.query("COMMIT");
+
+    return res.json({
+      success: true,
+
+      message:
+        "Symptom configuration saved successfully",
+
+      data: {
+        selectedOptionalCount:
+          uniqueIds.length,
+
+        selectedSymptomIds:
+          uniqueIds
+      }
+    });
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      console.error(
+        "Preference rollback error:",
+        rollbackError
+      );
+    }
+
+    console.error(
+      "saveUserSymptomConfiguration error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        "Failed to save symptom configuration"
+    });
+  } finally {
+    client.release();
+  }
+};
