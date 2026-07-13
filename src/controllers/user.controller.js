@@ -836,3 +836,190 @@ exports.updateProfileLinkRequest = async (req, res) => {
     });
   }
 };
+
+exports.getUserSymptomConfiguration = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "userid required"
+      });
+    }
+
+    const result = await db.query(
+      `
+      SELECT
+        sc.id,
+        sc.source_sheet,
+        sc.phase,
+        sc.category,
+        sc.symptom,
+        sc.priority,
+        sc.requirement,
+        sc.is_active,
+
+        CASE
+          WHEN sc.requirement = 'Mandatory'
+            THEN true
+          ELSE COALESCE(
+            usp.is_selected,
+            false
+          )
+        END AS is_selected,
+
+        CASE
+          WHEN sc.requirement = 'Mandatory'
+            THEN false
+          ELSE true
+        END AS is_editable
+
+      FROM symptom_config sc
+
+      LEFT JOIN user_symptom_preferences usp
+        ON usp.symptom_config_id = sc.id
+       AND usp.user_id = $1
+
+      WHERE sc.is_active = true
+
+      ORDER BY
+        CASE
+          WHEN sc.requirement = 'Mandatory'
+            THEN 1
+          ELSE 2
+        END,
+        sc.phase NULLS LAST,
+        sc.category NULLS LAST,
+        sc.priority NULLS LAST,
+        sc.symptom ASC
+      `,
+      [userId]
+    );
+
+    const allSymptoms = result.rows.map((row) => ({
+      id: row.id,
+      sourceSheet: row.source_sheet,
+      phase: row.phase,
+      category: row.category,
+      symptom: row.symptom,
+      priority: row.priority,
+      requirement: row.requirement,
+
+      isMandatory:
+        row.requirement === "Mandatory",
+
+      isOptional:
+        row.requirement === "Optional",
+
+      isSelected:
+        Boolean(row.is_selected),
+
+      isEditable:
+        Boolean(row.is_editable)
+    }));
+
+    const mandatorySymptoms =
+      allSymptoms.filter(
+        (item) => item.isMandatory
+      );
+
+    const optionalSymptoms =
+      allSymptoms.filter(
+        (item) => item.isOptional
+      );
+
+    const selectedOptionalSymptoms =
+      optionalSymptoms.filter(
+        (item) => item.isSelected
+      );
+
+    const unselectedOptionalSymptoms =
+      optionalSymptoms.filter(
+        (item) => !item.isSelected
+      );
+
+    const selectedSymptoms =
+      allSymptoms.filter(
+        (item) => item.isSelected
+      );
+
+    /*
+     * Optional grouping for easier frontend rendering.
+     */
+    const groupedByPhase = allSymptoms.reduce(
+      (groups, symptom) => {
+        const phase =
+          symptom.phase || "General";
+
+        if (!groups[phase]) {
+          groups[phase] = {
+            phase,
+            mandatory: [],
+            optional: []
+          };
+        }
+
+        if (symptom.isMandatory) {
+          groups[phase].mandatory.push(symptom);
+        } else {
+          groups[phase].optional.push(symptom);
+        }
+
+        return groups;
+      },
+      {}
+    );
+
+    return res.json({
+      success: true,
+
+      data: {
+        counts: {
+          total: allSymptoms.length,
+
+          mandatory:
+            mandatorySymptoms.length,
+
+          optional:
+            optionalSymptoms.length,
+
+          selectedOptional:
+            selectedOptionalSymptoms.length,
+
+          unselectedOptional:
+            unselectedOptionalSymptoms.length,
+
+          totalSelected:
+            selectedSymptoms.length
+        },
+
+        mandatorySymptoms,
+
+        optionalSymptoms,
+
+        selectedOptionalSymptoms,
+
+        unselectedOptionalSymptoms,
+
+        selectedSymptoms,
+
+        allSymptoms,
+
+        groupedByPhase:
+          Object.values(groupedByPhase)
+      }
+    });
+  } catch (error) {
+    console.error(
+      "getUserSymptomConfiguration error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        "Failed to fetch symptom configuration"
+    });
+  }
+};
