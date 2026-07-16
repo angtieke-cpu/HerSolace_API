@@ -30,6 +30,6 @@ router.get("/user-notifications", authenticate, getHomeNotifications);
 router.get("/user-config", authenticate, getUserSymptomConfiguration);
 router.get("/user-enabled-config", authenticate, getEnabledUserSymptoms);
 router.put("/link-user", authenticate, updateProfileLinkRequest);
-router.post("/user-config", authenticate, updateProfileLinkRequest);
+router.post("/user-config", authenticate, saveUserSymptomConfiguration);
 
 module.exports = router;
