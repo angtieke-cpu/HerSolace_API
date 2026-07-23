@@ -418,46 +418,98 @@ exports.getCycleHormoneData = async (req, res) => {
 };
 
 exports.createDailyLog = async (req, res) => {
-    try {
-        const userId = req.user.userId;
-        const logData = req.body;
+  try {
+    const userId = req.user?.userId;
+    const { logDate, logData } = req.body;
 
-        if (!userId) {
-            return res.status(400).json({
-                message: "User ID missing"
-            });
-        }
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID missing"
+      });
+    }
 
-        const result = await db.query(
-            `
-      INSERT INTO daily_health_logs (user_id, log_date, log_data)
-      VALUES ($1, CURRENT_DATE, $2)
+    if (!logDate) {
+      return res.status(400).json({
+        success: false,
+        message: "logDate is required"
+      });
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(logDate)) {
+      return res.status(400).json({
+        success: false,
+        message: "logDate must be in YYYY-MM-DD format"
+      });
+    }
+
+    if (!Array.isArray(logData)) {
+      return res.status(400).json({
+        success: false,
+        message: "logData must be an array"
+      });
+    }
+
+    const invalidSymptom = logData.some(
+      (item) =>
+        !item ||
+        typeof item !== "object" ||
+        Array.isArray(item) ||
+        !item.symptomId ||
+        typeof item.symptomId !== "string" ||
+        typeof item.isSelected !== "boolean"
+    );
+
+    if (invalidSymptom) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Each logData item must contain symptomId and boolean isSelected"
+      });
+    }
+
+    const result = await db.query(
+      `
+      INSERT INTO daily_health_logs (
+        user_id,
+        log_date,
+        log_data
+      )
+      VALUES ($1, $2::date, $3::jsonb)
 
       ON CONFLICT (user_id, log_date)
       DO UPDATE SET
         log_data = EXCLUDED.log_data,
         updated_at = NOW()
 
-      RETURNING *;
+      RETURNING
+        id,
+        user_id AS "userId",
+        log_date AS "logDate",
+        log_data AS "logData",
+        created_at AS "createdAt",
+        updated_at AS "updatedAt";
       `,
-            [userId, logData]
-        );
+      [
+        userId,
+        logDate,
+        JSON.stringify(logData)
+      ]
+    );
 
-        res.json({
-            success: true,
-            message:
-                result.command === "INSERT"
-                    ? "Daily log created"
-                    : "Daily log updated",
-            data: result.rows[0]
-        });
+    return res.status(200).json({
+      success: true,
+      message: "Daily log saved successfully",
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error("Daily log error:", error);
 
-    } catch (error) {
-        console.error("Daily log error:", error);
-        res.status(500).json({
-            message: "Failed to save log"
-        });
-    }
+    return res.status(500).json({
+      success: false,
+      message: "Failed to save daily log"
+    });
+  }
 };
 
 exports.getTodayLog = async (req, res) => {
