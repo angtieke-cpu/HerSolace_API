@@ -1465,6 +1465,7 @@ exports.getDashboardConfig = async (req, res) => {
         reminder,
         period_history AS "periodHistory",
         shared_profile AS "sharedProfile",
+        phase_based_theme AS "phaseBasedTheme",
         created_at AS "createdAt",
         updated_at AS "updatedAt";
       `,
@@ -1495,7 +1496,8 @@ exports.saveDashboardConfig = async (req, res) => {
       energyMood,
       reminder,
       periodHistory,
-      sharedProfile
+      sharedProfile,
+      phaseBasedTheme
     } = req.body;
 
     if (!userId) {
@@ -1511,7 +1513,8 @@ exports.saveDashboardConfig = async (req, res) => {
       energyMood,
       reminder,
       periodHistory,
-      sharedProfile
+      sharedProfile,
+      phaseBasedTheme
     };
 
     for (const [fieldName, value] of Object.entries(fields)) {
@@ -1532,7 +1535,8 @@ exports.saveDashboardConfig = async (req, res) => {
         energy_mood,
         reminder,
         period_history,
-        shared_profile
+        shared_profile,
+        phase_based_theme
       )
       VALUES (
         $1,
@@ -1541,7 +1545,8 @@ exports.saveDashboardConfig = async (req, res) => {
         $4,
         $5,
         $6,
-        $7
+        $7,
+        $8
       )
 
       ON CONFLICT (user_id)
@@ -1552,6 +1557,7 @@ exports.saveDashboardConfig = async (req, res) => {
         reminder = EXCLUDED.reminder,
         period_history = EXCLUDED.period_history,
         shared_profile = EXCLUDED.shared_profile,
+        phase_based_theme =  EXCLUDED.phase_based_theme,
         updated_at = NOW()
 
       RETURNING
@@ -1563,6 +1569,7 @@ exports.saveDashboardConfig = async (req, res) => {
         reminder,
         period_history AS "periodHistory",
         shared_profile AS "sharedProfile",
+        phase_based_theme  AS "phaseBasedTheme",
         created_at AS "createdAt",
         updated_at AS "updatedAt";
       `,
@@ -1573,7 +1580,8 @@ exports.saveDashboardConfig = async (req, res) => {
         energyMood,
         reminder,
         periodHistory,
-        sharedProfile
+        sharedProfile,
+        phaseBasedTheme
       ]
     );
 
