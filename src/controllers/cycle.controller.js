@@ -450,23 +450,21 @@ exports.createDailyLog = async (req, res) => {
       });
     }
 
-    const invalidSymptom = logData.some(
-      (item) =>
-        !item ||
-        typeof item !== "object" ||
-        Array.isArray(item) ||
-        !item.symptomId ||
-        typeof item.symptomId !== "string" ||
-        typeof item.isSelected !== "boolean"
-    );
+   const invalidSymptom = logData.some(
+  (item) =>
+    !item ||
+    typeof item !== "object" ||
+    Array.isArray(item) ||
+    !item.symptomId ||
+    typeof item.symptomId !== "string"
+);
 
-    if (invalidSymptom) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Each logData item must contain symptomId and boolean isSelected"
-      });
-    }
+if (invalidSymptom) {
+  return res.status(400).json({
+    success: false,
+    message: "Each logData item must contain a valid symptomId"
+  });
+}
 
     const result = await db.query(
       `
