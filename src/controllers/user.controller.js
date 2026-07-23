@@ -1433,3 +1433,161 @@ exports.saveUserSymptomConfiguration = async (req, res) => {
     client.release();
   }
 };
+
+exports.getDashboardConfig = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID missing"
+      });
+    }
+
+    const result = await db.query(
+      `
+      INSERT INTO user_dashboard_config (
+        user_id
+      )
+      VALUES ($1)
+
+      ON CONFLICT (user_id)
+      DO UPDATE SET
+        user_id = EXCLUDED.user_id
+
+      RETURNING
+        id,
+        user_id AS "userId",
+        graph_view AS "graphView",
+        insights,
+        energy_mood AS "energyMood",
+        reminder,
+        period_history AS "periodHistory",
+        shared_profile AS "sharedProfile",
+        created_at AS "createdAt",
+        updated_at AS "updatedAt";
+      `,
+      [userId]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Dashboard configuration fetched successfully",
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error("Get dashboard configuration error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch dashboard configuration"
+    });
+  }
+};
+exports.saveDashboardConfig = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+
+    const {
+      graphView,
+      insights,
+      energyMood,
+      reminder,
+      periodHistory,
+      sharedProfile
+    } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID missing"
+      });
+    }
+
+    const fields = {
+      graphView,
+      insights,
+      energyMood,
+      reminder,
+      periodHistory,
+      sharedProfile
+    };
+
+    for (const [fieldName, value] of Object.entries(fields)) {
+      if (typeof value !== "boolean") {
+        return res.status(400).json({
+          success: false,
+          message: `${fieldName} must be a boolean`
+        });
+      }
+    }
+
+    const result = await db.query(
+      `
+      INSERT INTO user_dashboard_config (
+        user_id,
+        graph_view,
+        insights,
+        energy_mood,
+        reminder,
+        period_history,
+        shared_profile
+      )
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7
+      )
+
+      ON CONFLICT (user_id)
+      DO UPDATE SET
+        graph_view = EXCLUDED.graph_view,
+        insights = EXCLUDED.insights,
+        energy_mood = EXCLUDED.energy_mood,
+        reminder = EXCLUDED.reminder,
+        period_history = EXCLUDED.period_history,
+        shared_profile = EXCLUDED.shared_profile,
+        updated_at = NOW()
+
+      RETURNING
+        id,
+        user_id AS "userId",
+        graph_view AS "graphView",
+        insights,
+        energy_mood AS "energyMood",
+        reminder,
+        period_history AS "periodHistory",
+        shared_profile AS "sharedProfile",
+        created_at AS "createdAt",
+        updated_at AS "updatedAt";
+      `,
+      [
+        userId,
+        graphView,
+        insights,
+        energyMood,
+        reminder,
+        periodHistory,
+        sharedProfile
+      ]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Dashboard configuration saved successfully",
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error("Save dashboard configuration error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to save dashboard configuration"
+    });
+  }
+};
