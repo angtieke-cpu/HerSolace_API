@@ -2080,3 +2080,53 @@ exports.saveMedicalHistory = async (req, res) => {
     });
   }
 };
+
+exports.getMedicalHistory = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID missing"
+      });
+    }
+
+    const result = await db.query(
+      `
+      SELECT
+        id,
+        user_id,
+        medical_history,
+        created_at,
+        updated_at
+      FROM user_medical_history
+      WHERE user_id = $1
+      LIMIT 1
+      `,
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: "Medical history not found",
+        data: {}
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Medical history fetched successfully",
+      data: result.rows[0].medical_history
+    });
+
+  } catch (error) {
+    console.error("Get medical history error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch medical history"
+    });
+  }
+};
