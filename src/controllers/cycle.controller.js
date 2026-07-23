@@ -513,43 +513,69 @@ exports.createDailyLog = async (req, res) => {
 };
 
 exports.getTodayLog = async (req, res) => {
-    try {
-        const userId = req.user.userId;
+  try {
+    const userId = req.user?.userId;
+    const { logDate } = req.query;
 
-        if (!userId) {
-            return res.status(400).json({
-                message: "User ID missing"
-            });
-        }
-
-        const result = await db.query(
-            `SELECT id, user_id, log_data, log_date, created_at
-       FROM daily_health_logs
-       WHERE user_id = $1
-       AND log_date = CURRENT_DATE`,
-            [userId]
-        );
-
-        if (result.rows.length === 0) {
-            return res.json({
-                success: true,
-                hasLog: false,
-                data: null
-            });
-        }
-
-        res.json({
-            success: true,
-            hasLog: true,
-            data: result.rows[0]
-        });
-
-    } catch (error) {
-        console.error("Get today log error:", error);
-        res.status(500).json({
-            message: "Failed to fetch log"
-        });
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID missing"
+      });
     }
+
+    if (!logDate) {
+      return res.status(400).json({
+        success: false,
+        message: "logDate is required"
+      });
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(logDate)) {
+      return res.status(400).json({
+        success: false,
+        message: "logDate must be in YYYY-MM-DD format"
+      });
+    }
+
+    const result = await db.query(
+      `
+      SELECT
+        id,
+        user_id AS "userId",
+        log_date AS "logDate",
+        log_data AS "logData",
+        created_at AS "createdAt",
+        updated_at AS "updatedAt"
+      FROM daily_health_logs
+      WHERE user_id = $1
+        AND log_date = $2::date
+      LIMIT 1
+      `,
+      [userId, logDate]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(200).json({
+        success: true,
+        hasLog: false,
+        data: null
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      hasLog: true,
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error("Get log error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch log"
+    });
+  }
 };
 
 exports.logLatestPeriod = async (req, res) => {
