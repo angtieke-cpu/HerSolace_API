@@ -2016,3 +2016,67 @@ exports.getCycleCalendarDetails = async (req, res) => {
     });
   }
 };
+
+exports.saveMedicalHistory = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    const medicalHistory = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID missing"
+      });
+    }
+
+    if (
+      !medicalHistory ||
+      typeof medicalHistory !== "object" ||
+      Array.isArray(medicalHistory)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Medical history must be a valid JSON object"
+      });
+    }
+
+    const result = await db.query(
+      `
+      INSERT INTO user_medical_history (
+        user_id,
+        medical_history
+      )
+      VALUES ($1, $2::jsonb)
+
+      ON CONFLICT (user_id)
+      DO UPDATE SET
+        medical_history = EXCLUDED.medical_history,
+        updated_at = NOW()
+
+      RETURNING
+        id,
+        user_id AS "userId",
+        medical_history AS "medicalHistory",
+        created_at AS "createdAt",
+        updated_at AS "updatedAt";
+      `,
+      [
+        userId,
+        JSON.stringify(medicalHistory)
+      ]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Medical history saved successfully",
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error("Save medical history error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to save medical history"
+    });
+  }
+};
