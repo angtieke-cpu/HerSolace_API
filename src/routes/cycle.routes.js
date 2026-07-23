@@ -25,7 +25,7 @@ router.get("/cycle-history", authenticate, getUserPeriodLogs);
 router.get("/period-status", authenticate, checkLatestPeriodLogged);
 router.get("/cycle-details-prediction", authenticate, getCycleCalendarDetails);
 router.get("/medical-history", authenticate, saveMedicalHistory);
-router.post("/medical-history", authenticate, getMedicalHistory);
+router.get("/medical-history", authenticate, getMedicalHistory);
 
 
 module.exports = router;
