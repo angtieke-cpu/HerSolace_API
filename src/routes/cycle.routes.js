@@ -24,7 +24,7 @@ router.get("/daily-log", authenticate, getTodayLog);
 router.get("/cycle-history", authenticate, getUserPeriodLogs);
 router.get("/period-status", authenticate, checkLatestPeriodLogged);
 router.get("/cycle-details-prediction", authenticate, getCycleCalendarDetails);
-router.get("/medical-history", authenticate, saveMedicalHistory);
+router.post("/medical-history", authenticate, saveMedicalHistory);
 router.get("/medical-history", authenticate, getMedicalHistory);
 
 
