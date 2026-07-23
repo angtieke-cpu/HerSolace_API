@@ -11,6 +11,7 @@ const { getUserPeriodLogs } = require("../controllers/cycle.controller");
 const { updateLatestCycleDetails } = require("../controllers/cycle.controller");
 const { getCycleCalendarDetails } = require("../controllers/cycle.controller");
 const { checkLatestPeriodLogged } = require("../controllers/cycle.controller");
+const { saveMedicalHistory } = require("../controllers/cycle.controller");
 
 router.get("/prediction",authenticate, getCyclePrediction);
 router.get("/cycle-details", authenticate, getPreviousCycleDetails);
@@ -22,6 +23,8 @@ router.get("/daily-log", authenticate, getTodayLog);
 router.get("/cycle-history", authenticate, getUserPeriodLogs);
 router.get("/period-status", authenticate, checkLatestPeriodLogged);
 router.get("/cycle-details-prediction", authenticate, getCycleCalendarDetails);
+router.get("/medical-history", authenticate, getTodayLog);
+router.post("/medical-history", authenticate, getTodayLog);
 
 
 module.exports = router;
