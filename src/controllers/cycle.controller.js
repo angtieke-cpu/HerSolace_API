@@ -1593,13 +1593,18 @@ exports.getCycleCalendarDetails = async (req, res) => {
     }
 
     /*
-     * Current cycle: not logged yet, so generated using the
-     * averaged cycle length / bleeding days. Its next-period
-     * date uses the overdue-aware `nextPeriod` rather than a
-     * plain cycleLength step, so it stays in sync with
-     * cycleSummary when the period is overdue.
+     * Current cycle: only when NOT overdue - effectiveCycleStart
+     * is the actual/assumed start of the cycle in progress, so
+     * its period days genuinely happened (or are assumed to).
+     * When overdue, effectiveCycleStart's expected period never
+     * got a DB entry confirming it started, so no period-days
+     * block is fabricated for it - the chain below picks up the
+     * "current" label instead, starting from `nextPeriod`.
      */
-    if (!effectiveCycleStart.isAfter(rangeEnd, "day")) {
+    if (
+      !isOverdue &&
+      !effectiveCycleStart.isAfter(rangeEnd, "day")
+    ) {
       predictedCycles.push(
         buildCycleEntry(
           effectiveCycleStart,
@@ -1612,13 +1617,16 @@ exports.getCycleCalendarDetails = async (req, res) => {
     }
 
     /*
-     * Future cycles: not logged yet either, generated using the
-     * averaged cycle length / bleeding days. Rebased to start
-     * from the overdue-aware `nextPeriod` so the whole chain
-     * shifts when the current cycle is overdue, instead of
+     * Future cycles: not logged yet, generated using the
+     * averaged cycle length / bleeding days, starting from the
+     * overdue-aware `nextPeriod`. When overdue, this is the same
+     * date as the current-cycle push above would have used, so
+     * the first entry here takes the "current" label instead of
+     * duplicating it - the whole chain shifts forward instead of
      * continuing from the now-too-late effectiveCycleStart chain.
      */
     let cycleStart = nextPeriod;
+    let isFirstInFutureChain = true;
 
     while (!cycleStart.isAfter(rangeEnd, "day")) {
       predictedCycles.push(
@@ -1626,10 +1634,13 @@ exports.getCycleCalendarDetails = async (req, res) => {
           cycleStart,
           cycleLength,
           bleedingDays,
-          "future"
+          isOverdue && isFirstInFutureChain
+            ? "current"
+            : "future"
         )
       );
 
+      isFirstInFutureChain = false;
       cycleStart = cycleStart.add(cycleLength, "day");
     }
 
