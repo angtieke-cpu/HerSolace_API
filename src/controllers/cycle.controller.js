@@ -1494,20 +1494,27 @@ exports.getCycleCalendarDetails = async (req, res) => {
       position,
       overrideNextPeriod
     ) => {
-      const cycleOvulation = cycleStart.add(
-        cycleStartLength - 14,
-        "day"
-      );
+      /*
+       * Ovulation / fertile / PMS are all derived from the next
+       * period date (luteal phase is ~14 fixed days before the
+       * next period), so when overrideNextPeriod is supplied
+       * (an overdue current cycle whose real next-period date is
+       * now known to be later than the averaged cycle length),
+       * they shift together with it instead of staying pinned to
+       * the stale cycleStart + averaged-length estimate.
+       */
+      const cycleNextPeriod =
+        overrideNextPeriod ||
+        cycleStart.add(cycleStartLength, "day");
+
+      const cycleOvulation =
+        cycleNextPeriod.subtract(14, "day");
 
       const cycleFertileStart =
         cycleOvulation.subtract(2, "day");
 
       const cycleFertileEnd =
         cycleOvulation.add(2, "day");
-
-      const cycleNextPeriod =
-        overrideNextPeriod ||
-        cycleStart.add(cycleStartLength, "day");
 
       const cyclePmsStart =
         cycleNextPeriod.subtract(5, "day");
@@ -1582,12 +1589,24 @@ exports.getCycleCalendarDetails = async (req, res) => {
         continue;
       }
 
+      /*
+       * The most recently logged cycle is the one that's
+       * currently overdue (that's the only way it can end up in
+       * this "past" loop at all) - its next-period date and
+       * derived phases should reflect the overdue-aware
+       * `nextPeriod`, not the stale cycleLength-based guess that
+       * never actually happened.
+       */
+      const isMostRecentLoggedCycle =
+        periodStart.isSame(lastPeriod, "day");
+
       predictedCycles.push(
         buildCycleEntry(
           periodStart,
           Number(record.cycleLength) || cycleLength,
           Number(record.bleedingDays) || 5,
-          "past"
+          "past",
+          isMostRecentLoggedCycle ? nextPeriod : undefined
         )
       );
     }
