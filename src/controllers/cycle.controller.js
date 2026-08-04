@@ -1273,17 +1273,13 @@ exports.getCycleCalendarDetails = async (req, res) => {
         "day"
       );
 
-    const firstExpectedPeriod =
-      lastPeriod.add(cycleLength, "day");
-
-    const isOverdue =
-      firstExpectedPeriod.isBefore(today, "day");
-
     /*
-     * Same frontend behavior:
-     * when the first expected period is already past,
-     * next period is shown as tomorrow.
+     * When the predicted next period falls today or earlier,
+     * show it as tomorrow instead.
      */
+    const isOverdue =
+      !rawNextPeriod.isAfter(today, "day");
+
     const nextPeriod = isOverdue
       ? today.add(1, "day")
       : rawNextPeriod;
@@ -1424,209 +1420,184 @@ exports.getCycleCalendarDetails = async (req, res) => {
     }
 
     // ---------------------------------------------------------
-    // 8. Generate predicted cycles for previous 6 months
-    // and future 12 months
+    // 8. Build cycle entries.
+    // Past cycles use the actual logged history within the
+    // previous-6-months range (their own cycle length /
+    // bleeding days) instead of fabricated predictions - only
+    // as many past entries exist as are actually logged.
+    // Current + future cycles are generated using the averaged
+    // cycle length / bleeding days since they are not logged yet.
     // ---------------------------------------------------------
 
     const predictedCycles = [];
-
-    /*
-     * Find a cycle start on or before rangeStart.
-     */
-    let predictionCycleStart =
-      effectiveCycleStart;
-
-    while (
-      predictionCycleStart.isAfter(
-        rangeStart,
-        "day"
-      )
-    ) {
-      predictionCycleStart =
-        predictionCycleStart.subtract(
-          cycleLength,
-          "day"
-        );
-    }
-
-    /*
-     * Move one cycle forward when the previous subtraction
-     * went beyond the required boundary.
-     */
-    while (
-      predictionCycleStart
-        .add(cycleLength, "day")
-        .isBefore(rangeStart, "day")
-    ) {
-      predictionCycleStart =
-        predictionCycleStart.add(
-          cycleLength,
-          "day"
-        );
-    }
-
     let predictionIndex = 0;
-    let cycleStart = predictionCycleStart;
 
-    while (
-      !cycleStart.isAfter(rangeEnd, "day")
-    ) {
-      const predictedOvulation =
-        cycleStart.add(
-          cycleLength - 14,
-          "day"
-        );
-
-      const predictedFertileStart =
-        predictedOvulation.subtract(2, "day");
-
-      const predictedFertileEnd =
-        predictedOvulation.add(2, "day");
-
-      const predictedNextPeriod =
-        cycleStart.add(
-          cycleLength,
-          "day"
-        );
-
-      const predictedPmsStart =
-        predictedNextPeriod.subtract(5, "day");
-
-      const predictedPmsEnd =
-        predictedNextPeriod.subtract(1, "day");
-
-      const periodDates = [];
+    const collectPeriodDates = (start, count) => {
+      const dates = [];
 
       for (
         let dayIndex = 0;
-        dayIndex < bleedingDays;
+        dayIndex < count;
         dayIndex++
       ) {
-        const date =
-          cycleStart.add(dayIndex, "day");
+        const date = start.add(dayIndex, "day");
 
         if (
           !date.isBefore(rangeStart, "day") &&
           !date.isAfter(rangeEnd, "day")
         ) {
-          periodDates.push(
-            date.format("YYYY-MM-DD")
-          );
+          dates.push(date.format("YYYY-MM-DD"));
         }
       }
 
-      const fertileDates = [];
+      return dates;
+    };
 
-      let fertileDate =
-        predictedFertileStart;
+    const collectDatesInRange = (start, end) => {
+      const dates = [];
+      let cursor = start;
 
       while (
-        fertileDate.isBefore(
-          predictedFertileEnd,
-          "day"
-        ) ||
-        fertileDate.isSame(
-          predictedFertileEnd,
-          "day"
-        )
+        cursor.isBefore(end, "day") ||
+        cursor.isSame(end, "day")
       ) {
         if (
-          !fertileDate.isBefore(rangeStart, "day") &&
-          !fertileDate.isAfter(rangeEnd, "day")
+          !cursor.isBefore(rangeStart, "day") &&
+          !cursor.isAfter(rangeEnd, "day")
         ) {
-          fertileDates.push(
-            fertileDate.format("YYYY-MM-DD")
-          );
+          dates.push(cursor.format("YYYY-MM-DD"));
         }
 
-        fertileDate =
-          fertileDate.add(1, "day");
+        cursor = cursor.add(1, "day");
       }
 
-      const pmsDates = [];
+      return dates;
+    };
 
-      let pmsDate = predictedPmsStart;
+    const buildCycleEntry = (
+      cycleStart,
+      cycleStartLength,
+      cycleStartBleedingDays,
+      position
+    ) => {
+      const cycleOvulation = cycleStart.add(
+        cycleStartLength - 14,
+        "day"
+      );
 
-      while (
-        pmsDate.isBefore(predictedPmsEnd, "day") ||
-        pmsDate.isSame(predictedPmsEnd, "day")
-      ) {
-        if (
-          !pmsDate.isBefore(rangeStart, "day") &&
-          !pmsDate.isAfter(rangeEnd, "day")
-        ) {
-          pmsDates.push(
-            pmsDate.format("YYYY-MM-DD")
-          );
-        }
+      const cycleFertileStart =
+        cycleOvulation.subtract(2, "day");
 
-        pmsDate = pmsDate.add(1, "day");
-      }
+      const cycleFertileEnd =
+        cycleOvulation.add(2, "day");
 
-      predictedCycles.push({
-        predictionIndex,
+      const cycleNextPeriod = cycleStart.add(
+        cycleStartLength,
+        "day"
+      );
+
+      const cyclePmsStart =
+        cycleNextPeriod.subtract(5, "day");
+
+      const cyclePmsEnd =
+        cycleNextPeriod.subtract(1, "day");
+
+      return {
+        predictionIndex: predictionIndex++,
 
         cycleStartDate:
           cycleStart.format("YYYY-MM-DD"),
 
-        cycleLength,
-        bleedingDays,
+        cycleLength: cycleStartLength,
+        bleedingDays: cycleStartBleedingDays,
 
-        periodDates,
+        periodDates: collectPeriodDates(
+          cycleStart,
+          cycleStartBleedingDays
+        ),
 
         fertileWindow: {
           startDate:
-            predictedFertileStart.format(
-              "YYYY-MM-DD"
-            ),
+            cycleFertileStart.format("YYYY-MM-DD"),
 
           endDate:
-            predictedFertileEnd.format(
-              "YYYY-MM-DD"
-            ),
+            cycleFertileEnd.format("YYYY-MM-DD"),
 
-          dates: fertileDates
+          dates: collectDatesInRange(
+            cycleFertileStart,
+            cycleFertileEnd
+          )
         },
 
         ovulationDate:
-          predictedOvulation.format(
-            "YYYY-MM-DD"
-          ),
+          cycleOvulation.format("YYYY-MM-DD"),
 
         pmsWindow: {
           startDate:
-            predictedPmsStart.format(
-              "YYYY-MM-DD"
-            ),
+            cyclePmsStart.format("YYYY-MM-DD"),
 
           endDate:
-            predictedPmsEnd.format(
-              "YYYY-MM-DD"
-            ),
+            cyclePmsEnd.format("YYYY-MM-DD"),
 
-          dates: pmsDates
+          dates: collectDatesInRange(
+            cyclePmsStart,
+            cyclePmsEnd
+          )
         },
 
         nextPeriodDate:
-          predictedNextPeriod.format(
-            "YYYY-MM-DD"
-          ),
+          cycleNextPeriod.format("YYYY-MM-DD"),
 
-        position:
-          cycleStart.isBefore(today, "day")
-            ? "past"
-            : cycleStart.isSame(
-                effectiveCycleStart,
-                "day"
-              )
-              ? "current"
-              : "future"
-      });
+        position
+      };
+    };
 
-      cycleStart =
-        cycleStart.add(cycleLength, "day");
+    /*
+     * Past cycles: only the periods actually logged in the DB
+     * within the previous-6-months window. Nothing is fabricated
+     * to fill the range beyond what was actually logged.
+     */
+    for (const record of history) {
+      const periodStart = dayjs(
+        record.periodDate
+      ).startOf("day");
 
-      predictionIndex++;
+      if (
+        !periodStart.isBefore(effectiveCycleStart, "day") ||
+        periodStart.isBefore(rangeStart, "day")
+      ) {
+        continue;
+      }
+
+      predictedCycles.push(
+        buildCycleEntry(
+          periodStart,
+          Number(record.cycleLength) || cycleLength,
+          Number(record.bleedingDays) || 5,
+          "past"
+        )
+      );
+    }
+
+    /*
+     * Current + future cycles: not logged yet, so generated
+     * using the averaged cycle length / bleeding days.
+     */
+    let cycleStart = effectiveCycleStart;
+
+    while (!cycleStart.isAfter(rangeEnd, "day")) {
+      predictedCycles.push(
+        buildCycleEntry(
+          cycleStart,
+          cycleLength,
+          bleedingDays,
+          cycleStart.isSame(effectiveCycleStart, "day")
+            ? "current"
+            : "future"
+        )
+      );
+
+      cycleStart = cycleStart.add(cycleLength, "day");
     }
 
     // ---------------------------------------------------------
