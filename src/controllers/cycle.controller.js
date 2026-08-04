@@ -991,7 +991,6 @@ exports.updateLatestCycleDetails = async (req, res) => {
     }
 
 };
-
 exports.getCycleCalendarDetails = async (req, res) => {
   try {
     const userId = req.user?.userId;
@@ -1162,7 +1161,6 @@ exports.getCycleCalendarDetails = async (req, res) => {
           cycleSummary: null,
           confirmedPeriods: [],
           predictedCycles: [],
-          calendarDays: [],
           healthLogDates,
           plannerDates
         }
@@ -1264,9 +1262,10 @@ exports.getCycleCalendarDetails = async (req, res) => {
     );
 
     const fertileStart =
-      ovulation.subtract(5, "day");
+      ovulation.subtract(2, "day");
 
-    const fertileEnd = ovulation;
+    const fertileEnd =
+      ovulation.add(2, "day");
 
     const rawNextPeriod =
       effectiveCycleStart.add(
@@ -1479,10 +1478,10 @@ exports.getCycleCalendarDetails = async (req, res) => {
         );
 
       const predictedFertileStart =
-        predictedOvulation.subtract(5, "day");
+        predictedOvulation.subtract(2, "day");
 
       const predictedFertileEnd =
-        predictedOvulation;
+        predictedOvulation.add(2, "day");
 
       const predictedNextPeriod =
         cycleStart.add(
@@ -2067,10 +2066,6 @@ exports.getCycleCalendarDetails = async (req, res) => {
         healthLogDates,
         plannerDates,
 
-        calendarDays,
-
-        months: Object.values(months),
-
         selectedMonthData
       }
     });
@@ -2092,6 +2087,7 @@ exports.getCycleCalendarDetails = async (req, res) => {
     });
   }
 };
+
 
 exports.saveMedicalHistory = async (req, res) => {
   try {
