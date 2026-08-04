@@ -1240,6 +1240,13 @@ exports.getCycleCalendarDetails = async (req, res) => {
 
     let effectiveCycleStart = lastPeriod;
 
+    /*
+     * True when at least one expected period date has already
+     * passed without a new DB entry confirming it started -
+     * i.e. the period is currently overdue.
+     */
+    let missedCycleDetected = false;
+
     while (
       effectiveCycleStart
         .add(cycleLength, "day")
@@ -1250,6 +1257,8 @@ exports.getCycleCalendarDetails = async (req, res) => {
           cycleLength,
           "day"
         );
+
+      missedCycleDetected = true;
     }
 
     // ---------------------------------------------------------
@@ -1274,10 +1283,14 @@ exports.getCycleCalendarDetails = async (req, res) => {
       );
 
     /*
-     * When the predicted next period falls today or earlier,
-     * show it as tomorrow instead.
+     * Overdue when a cycle was already missed (an expected
+     * period date passed without a new DB entry) or when the
+     * predicted next period falls today or earlier. In both
+     * cases we don't know the real start date, so show it as
+     * tomorrow instead of jumping a full cycle ahead.
      */
     const isOverdue =
+      missedCycleDetected ||
       !rawNextPeriod.isAfter(today, "day");
 
     const nextPeriod = isOverdue
@@ -1478,7 +1491,8 @@ exports.getCycleCalendarDetails = async (req, res) => {
       cycleStart,
       cycleStartLength,
       cycleStartBleedingDays,
-      position
+      position,
+      overrideNextPeriod
     ) => {
       const cycleOvulation = cycleStart.add(
         cycleStartLength - 14,
@@ -1491,10 +1505,9 @@ exports.getCycleCalendarDetails = async (req, res) => {
       const cycleFertileEnd =
         cycleOvulation.add(2, "day");
 
-      const cycleNextPeriod = cycleStart.add(
-        cycleStartLength,
-        "day"
-      );
+      const cycleNextPeriod =
+        overrideNextPeriod ||
+        cycleStart.add(cycleStartLength, "day");
 
       const cyclePmsStart =
         cycleNextPeriod.subtract(5, "day");
@@ -1580,10 +1593,32 @@ exports.getCycleCalendarDetails = async (req, res) => {
     }
 
     /*
-     * Current + future cycles: not logged yet, so generated
-     * using the averaged cycle length / bleeding days.
+     * Current cycle: not logged yet, so generated using the
+     * averaged cycle length / bleeding days. Its next-period
+     * date uses the overdue-aware `nextPeriod` rather than a
+     * plain cycleLength step, so it stays in sync with
+     * cycleSummary when the period is overdue.
      */
-    let cycleStart = effectiveCycleStart;
+    if (!effectiveCycleStart.isAfter(rangeEnd, "day")) {
+      predictedCycles.push(
+        buildCycleEntry(
+          effectiveCycleStart,
+          cycleLength,
+          bleedingDays,
+          "current",
+          nextPeriod
+        )
+      );
+    }
+
+    /*
+     * Future cycles: not logged yet either, generated using the
+     * averaged cycle length / bleeding days. Rebased to start
+     * from the overdue-aware `nextPeriod` so the whole chain
+     * shifts when the current cycle is overdue, instead of
+     * continuing from the now-too-late effectiveCycleStart chain.
+     */
+    let cycleStart = nextPeriod;
 
     while (!cycleStart.isAfter(rangeEnd, "day")) {
       predictedCycles.push(
@@ -1591,9 +1626,7 @@ exports.getCycleCalendarDetails = async (req, res) => {
           cycleStart,
           cycleLength,
           bleedingDays,
-          cycleStart.isSame(effectiveCycleStart, "day")
-            ? "current"
-            : "future"
+          "future"
         )
       );
 
