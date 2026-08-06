@@ -528,9 +528,10 @@ exports.createUserDeleteRequest = async (req, res) => {
     });
   }
 };
+
 exports.getHomeNotifications = async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const userId = req.user?.userId;
 
     if (!userId) {
       return res.status(400).json({
@@ -539,12 +540,12 @@ exports.getHomeNotifications = async (req, res) => {
       });
     }
 
+    // Get current date normalized to start of day (Asia/Kolkata context)
+    const now = new Date();
     const today = new Date(
-      new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
+      now.toLocaleDateString("en-US", { timeZone: "Asia/Kolkata" })
     );
-    today.setHours(0, 0, 0, 0);
 
-    // 1. Latest period log
     const periodResult = await db.query(
       `
       SELECT period_date, cycle_length, bleeding_days
@@ -556,20 +557,17 @@ exports.getHomeNotifications = async (req, res) => {
       [userId]
     );
 
-    const notifications = [];
+    const derivedNotifications = [];
 
     if (periodResult.rows.length > 0) {
       const log = periodResult.rows[0];
-
       const cycleLength = Number(log.cycle_length) || 28;
-      const bleedingDays = Number(log.bleeding_days) || 5;
 
       const lastPeriodDate = new Date(
-        new Date(log.period_date).toLocaleString("en-US", {
+        new Date(log.period_date).toLocaleDateString("en-US", {
           timeZone: "Asia/Kolkata"
         })
       );
-      lastPeriodDate.setHours(0, 0, 0, 0);
 
       const nextPeriodDate = new Date(lastPeriodDate);
       nextPeriodDate.setDate(lastPeriodDate.getDate() + cycleLength);
@@ -583,126 +581,180 @@ exports.getHomeNotifications = async (req, res) => {
       const fertileEndDate = new Date(ovulationDate);
       fertileEndDate.setDate(ovulationDate.getDate() + 1);
 
-      const daysToPeriod = Math.ceil(
-        (nextPeriodDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
-      );
+      // Day differences calculated relative to normalized today
+      const MS_PER_DAY = 1000 * 60 * 60 * 24;
+      const daysToPeriod = Math.ceil((nextPeriodDate - today) / MS_PER_DAY);
+      const daysToOvulation = Math.ceil((ovulationDate - today) / MS_PER_DAY);
+      const daysToFertile = Math.ceil((fertileStartDate - today) / MS_PER_DAY);
 
-      const daysToOvulation = Math.ceil(
-        (ovulationDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
-      );
-
-      const daysToFertile = Math.ceil(
-        (fertileStartDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
-      );
-
-      // Period starts within 7 days
       if (daysToPeriod >= 0 && daysToPeriod <= 7) {
-        notifications.push({
-          type: "period_reminder",
+        const dateStr = nextPeriodDate.toISOString().split("T")[0];
+        derivedNotifications.push({
+          notification_type: "period_reminder",
+          notification_key: `period_${dateStr}`,
           title: "Period reminder",
-          message: `Your period is expected within ${daysToPeriod === 0 ? "today" : daysToPeriod + " days"}. Keep essentials ready and log any symptoms early.`,
-          expected_window: `within ${daysToPeriod === 0 ? "today" : daysToPeriod + " days"}`,
-          date: nextPeriodDate.toISOString().split("T")[0]
+          message: `Your period is expected within ${
+            daysToPeriod === 0 ? "today" : daysToPeriod + " days"
+          }. Keep essentials ready and log any symptoms early.`,
+          notification_date: dateStr,
+          payload: {
+            expected_window: daysToPeriod === 0 ? "today" : `${daysToPeriod} days`,
+            date: dateStr
+          }
         });
       }
 
-      // Ovulation within 7 days
       if (daysToOvulation >= 0 && daysToOvulation <= 7) {
-        notifications.push({
-          type: "ovulation_reminder",
+        const dateStr = ovulationDate.toISOString().split("T")[0];
+        derivedNotifications.push({
+          notification_type: "ovulation_reminder",
+          notification_key: `ovulation_${dateStr}`,
           title: "Ovulation reminder",
-          message: `Your ovulation is expected within ${daysToOvulation === 0 ? "today" : daysToOvulation + " days"}.`,
-          expected_window: `within ${daysToOvulation === 0 ? "today" : daysToOvulation + " days"}`,
-          date: ovulationDate.toISOString().split("T")[0]
+          message: `Your ovulation is expected within ${
+            daysToOvulation === 0 ? "today" : daysToOvulation + " days"
+          }.`,
+          notification_date: dateStr,
+          payload: {
+            expected_window: daysToOvulation === 0 ? "today" : `${daysToOvulation} days`,
+            date: dateStr
+          }
         });
       }
 
-      // Fertile window starts within 7 days
       if (daysToFertile >= 0 && daysToFertile <= 7) {
-        notifications.push({
-          type: "fertile_window_reminder",
+        const startDateStr = fertileStartDate.toISOString().split("T")[0];
+        const endDateStr = fertileEndDate.toISOString().split("T")[0];
+        derivedNotifications.push({
+          notification_type: "fertile_window_reminder",
+          notification_key: `fertile_${startDateStr}`,
           title: "Fertile window reminder",
-          message: `Your fertile window is expected within ${daysToFertile === 0 ? "today" : daysToFertile + " days"}.`,
-          expected_window: `within ${daysToFertile === 0 ? "today" : daysToFertile + " days"}`,
-          start_date: fertileStartDate.toISOString().split("T")[0],
-          end_date: fertileEndDate.toISOString().split("T")[0]
+          message: `Your fertile window is expected within ${
+            daysToFertile === 0 ? "today" : daysToFertile + " days"
+          }.`,
+          notification_date: startDateStr,
+          payload: {
+            expected_window: daysToFertile === 0 ? "today" : `${daysToFertile} days`,
+            start_date: startDateStr,
+            end_date: endDateStr
+          }
         });
       }
     }
 
-    // 2. Pending link profile requests
+    // ============================
+    // Link Profile Requests
+    // ============================
     const linkRequestsResult = await db.query(
-  `
-  SELECT 
-    upl.id AS link_id,
-    upl.relationship,
-    upl.status,
-    upl.reject_count,
-    (3 - upl.reject_count) AS remaining_attempts,
-    CASE 
-      WHEN upl.reject_count >= 2 THEN true
-      ELSE false
-    END AS will_block_on_reject,
-    upl.created_at,
+      `
+      SELECT
+        upl.id AS link_id,
+        upl.relationship,
+        upl.status,
+        upl.reject_count,
+        (3 - upl.reject_count) AS remaining_attempts,
+        CASE
+          WHEN upl.reject_count >= 2 THEN true
+          ELSE false
+        END AS will_block_on_reject,
+        upl.created_at,
+        u.id AS requested_user_id,
+        u.name,
+        u.mobile_number
+      FROM user_profile_links upl
+      JOIN users u ON u.id = upl.requested_by
+      WHERE upl.linked_user_id = $1
+        AND upl.status = 'pending'
+        AND upl.is_blocked = false
+      ORDER BY upl.created_at DESC
+      `,
+      [userId]
+    );
 
-    u.id AS requested_user_id,
-    u.name,
-    u.mobile_number
+    // ==========================================
+    // Save Derived Period Notifications (Parallel)
+    // ==========================================
+    const periodNotificationPromises = derivedNotifications.map((item) =>
+      db.query(
+        `
+        INSERT INTO user_notification_tracker
+        (user_id, notification_type, notification_key, title, message, payload, notification_date)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (user_id, notification_key)
+        DO NOTHING
+        `,
+        [
+          userId,
+          item.notification_type,
+          item.notification_key,
+          item.title,
+          item.message,
+          JSON.stringify(item.payload),
+          item.notification_date
+        ]
+      )
+    );
 
-  FROM user_profile_links upl
+    // ==========================================
+    // Save Link Request Notifications (Parallel)
+    // ==========================================
+    const linkNotificationPromises = linkRequestsResult.rows.map((request) =>
+      db.query(
+        `
+        INSERT INTO user_notification_tracker
+        (user_id, notification_type, notification_key, title, message, payload, notification_date)
+        VALUES ($1, 'link_request', $2, $3, $4, $5, CURRENT_DATE)
+        ON CONFLICT (user_id, notification_key)
+        DO NOTHING
+        `,
+        [
+          userId,
+          `link_request_${request.link_id}`,
+          "Profile Link Request",
+          `${request.name} sent you a profile link request.`,
+          JSON.stringify(request)
+        ]
+      )
+    );
 
-  JOIN users u 
-    ON u.id = upl.requested_by
+    // Execute database operations in parallel
+    await Promise.all([...periodNotificationPromises, ...linkNotificationPromises]);
 
-  WHERE upl.linked_user_id = $1
-    AND upl.status = 'pending'
-    AND upl.is_blocked = false
+    // ==========================================
+    // Fetch Only Unread Notifications
+    // ==========================================
+    const notificationResult = await db.query(
+      `
+      SELECT
+        id,
+        notification_type,
+        title,
+        message,
+        payload,
+        notification_date,
+        is_viewed,
+        created_at
+      FROM user_notification_tracker
+      WHERE user_id = $1
+        AND is_viewed = false
+      ORDER BY created_at DESC
+      `,
+      [userId]
+    );
 
-  ORDER BY upl.created_at DESC
-  `,
-  [userId]
-);
-
-  const allNotifications = [];
-
-// Period notifications
-notifications.forEach((item) => {
-  allNotifications.push({
-    notification_type: "period",
-    created_at: item.date || new Date().toISOString(),
-    data: item
-  });
-});
-
-// Link profile requests
-linkRequestsResult.rows.forEach((item) => {
-  allNotifications.push({
-    notification_type: "link_request",
-    created_at: item.created_at,
-    data: item
-  });
-});
-
-// Sort latest first
-allNotifications.sort(
-  (a, b) => new Date(b.created_at) - new Date(a.created_at)
-);
-
-return res.json({
-  success: true,
-  totalNotifications: allNotifications.length,
-  linkProfileRequestsCount: linkRequestsResult.rows.length,
-  notifications: allNotifications
-});
-
+    return res.json({
+      success: true,
+      totalNotifications: notificationResult.rows.length,
+      notifications: notificationResult.rows
+    });
   } catch (error) {
-    console.error("Notification API error:", error);
+    console.error("Error in getHomeNotifications:", error);
     return res.status(500).json({
       success: false,
-      message: "Server error"
+      message: "Internal server error"
     });
   }
 };
+  
 exports.updateProfileLinkRequest = async (req, res) => {
   try {
     const userId = req.user.userId;
