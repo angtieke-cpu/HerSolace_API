@@ -1599,3 +1599,42 @@ exports.saveDashboardConfig = async (req, res) => {
     });
   }
 };
+exports.markNotificationViewed = async (req, res) => {
+
+    try {
+
+        const userId = req.user.userId;
+
+        const { notificationId } = req.body;
+
+        await db.query(
+            `
+            UPDATE user_notification_tracker
+            SET
+                is_viewed = true,
+                viewed_at = NOW()
+            WHERE
+                id=$1
+            AND
+                user_id=$2
+            `,
+            [notificationId, userId]
+        );
+
+        return res.json({
+            success: true,
+            message: "Notification marked as viewed."
+        });
+
+    } catch (err) {
+
+        console.log(err);
+
+        return res.status(500).json({
+            success:false,
+            message:"Server error"
+        });
+
+    }
+
+};
