@@ -1,6 +1,11 @@
 const db = require('../db');
 const { generateToken } = require('../utils/jwt');
 const { sendOtpSms } = require('../utils/twilio');
+const { OAuth2Client } = require("google-auth-library");
+
+const googleClient = new OAuth2Client(
+  process.env.GOOGLE_CLIENT_ID
+);
 
 const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
 // const generateOtp =123456;
@@ -192,5 +197,379 @@ exports.verifyOtp = async (req, res) => {
     res.status(500).json({
       message: 'OTP verification failed',
     });
+  }
+};
+
+exports.googleLogin = async (req, res) => {
+  const client = await db.connect();
+
+  try {
+    const { idToken } = req.body;
+
+    if (!idToken) {
+      return res.status(400).json({
+        success: false,
+        message: "Google ID token is required"
+      });
+    }
+
+    // 1. Verify Google ID token
+    const ticket = await googleClient.verifyIdToken({
+      idToken,
+      audience: process.env.GOOGLE_CLIENT_ID
+    });
+
+    const payload = ticket.getPayload();
+
+    if (!payload) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid Google token"
+      });
+    }
+
+    const googleUserId = payload.sub;
+    const email = payload.email || null;
+    const name = payload.name || null;
+    const picture = payload.picture || null;
+
+    if (!googleUserId) {
+      return res.status(401).json({
+        success: false,
+        message: "Google user ID not found"
+      });
+    }
+
+    await client.query("BEGIN");
+
+    // 2. Check whether Google account is already linked
+    const providerResult = await client.query(
+      `
+      SELECT
+        uap.user_id,
+        u.id,
+        u.name,
+        u.email,
+        u.mobile_number
+      FROM user_auth_providers uap
+      JOIN users u
+        ON u.id = uap.user_id
+      WHERE uap.provider = 'google'
+        AND uap.provider_user_id = $1
+      LIMIT 1
+      `,
+      [googleUserId]
+    );
+
+    let user;
+
+    if (providerResult.rows.length > 0) {
+      // Existing Google user
+      user = providerResult.rows[0];
+    } else {
+
+      // 3. Check whether email already belongs to a user
+      let existingUser = null;
+
+      if (email) {
+        const emailResult = await client.query(
+          `
+          SELECT
+            id,
+            name,
+            email,
+            mobile_number
+          FROM users
+          WHERE LOWER(email) = LOWER($1)
+          LIMIT 1
+          `,
+          [email]
+        );
+
+        if (emailResult.rows.length > 0) {
+          existingUser = emailResult.rows[0];
+        }
+      }
+
+      if (existingUser) {
+        // Existing OTP account
+        user = existingUser;
+      } else {
+        // 4. Create new user
+        const userResult = await client.query(
+          `
+          INSERT INTO users (
+            name,
+            email
+          )
+          VALUES ($1, $2)
+          RETURNING
+            id,
+            name,
+            email,
+            mobile_number
+          `,
+          [name, email]
+        );
+
+        user = userResult.rows[0];
+      }
+
+      // 5. Link Google account
+      await client.query(
+        `
+        INSERT INTO user_auth_providers (
+          user_id,
+          provider,
+          provider_user_id,
+          email
+        )
+        VALUES ($1, 'google', $2, $3)
+        ON CONFLICT (provider, provider_user_id)
+        DO UPDATE SET
+          email = EXCLUDED.email,
+          updated_at = CURRENT_TIMESTAMP
+        `,
+        [
+          user.id,
+          googleUserId,
+          email
+        ]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    // 6. Generate your existing HerSolace JWT
+    const token = generateToken({
+      userId: user.id
+    });
+
+    return res.json({
+      success: true,
+      message: "Google login successful",
+      userId: user.id,
+      token,
+      isNewUser: !providerResult.rows.length,
+      user
+    });
+
+  } catch (error) {
+    await client.query("ROLLBACK");
+
+    console.error("Google login error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Google login failed"
+    });
+
+  } finally {
+    client.release();
+  }
+};
+
+exports.facebookLogin = async (req, res) => {
+  const client = await db.connect();
+
+  try {
+    const { accessToken } = req.body;
+
+    if (!accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: "Facebook access token is required"
+      });
+    }
+
+    // 1. Verify Facebook token and get user information
+    const debugUrl =
+      `https://graph.facebook.com/debug_token` +
+      `?input_token=${encodeURIComponent(accessToken)}` +
+      `&access_token=${encodeURIComponent(
+        `${process.env.FACEBOOK_APP_ID}|${process.env.FACEBOOK_APP_SECRET}`
+      )}`;
+
+    const debugResponse = await fetch(debugUrl);
+
+    if (!debugResponse.ok) {
+      return res.status(401).json({
+        success: false,
+        message: "Unable to verify Facebook token"
+      });
+    }
+
+    const debugData = await debugResponse.json();
+
+    if (
+      !debugData?.data?.is_valid ||
+      debugData?.data?.app_id !== process.env.FACEBOOK_APP_ID
+    ) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid Facebook access token"
+      });
+    }
+
+    const facebookUserId = debugData.data.user_id;
+
+    if (!facebookUserId) {
+      return res.status(401).json({
+        success: false,
+        message: "Facebook user ID not found"
+      });
+    }
+
+    // 2. Get Facebook profile
+    const profileUrl =
+      `https://graph.facebook.com/me` +
+      `?fields=id,name,email,picture.type(large)` +
+      `&access_token=${encodeURIComponent(accessToken)}`;
+
+    const profileResponse = await fetch(profileUrl);
+
+    if (!profileResponse.ok) {
+      return res.status(401).json({
+        success: false,
+        message: "Unable to fetch Facebook profile"
+      });
+    }
+
+    const profile = await profileResponse.json();
+
+    const name = profile.name || null;
+    const email = profile.email || null;
+
+    await client.query("BEGIN");
+
+    // 3. Check existing Facebook account
+    const providerResult = await client.query(
+      `
+      SELECT
+        uap.user_id,
+        u.id,
+        u.name,
+        u.email,
+        u.mobile_number
+      FROM user_auth_providers uap
+      JOIN users u
+        ON u.id = uap.user_id
+      WHERE uap.provider = 'facebook'
+        AND uap.provider_user_id = $1
+      LIMIT 1
+      `,
+      [facebookUserId]
+    );
+
+    let user;
+
+    if (providerResult.rows.length > 0) {
+
+      // Existing Facebook user
+      user = providerResult.rows[0];
+
+    } else {
+
+      // 4. Check existing account using email
+      let existingUser = null;
+
+      if (email) {
+        const emailResult = await client.query(
+          `
+          SELECT
+            id,
+            name,
+            email,
+            mobile_number
+          FROM users
+          WHERE LOWER(email) = LOWER($1)
+          LIMIT 1
+          `,
+          [email]
+        );
+
+        if (emailResult.rows.length > 0) {
+          existingUser = emailResult.rows[0];
+        }
+      }
+
+      if (existingUser) {
+
+        // Existing OTP/Google account
+        user = existingUser;
+
+      } else {
+
+        // 5. Create new user
+        const userResult = await client.query(
+          `
+          INSERT INTO users (
+            name,
+            email
+          )
+          VALUES ($1, $2)
+          RETURNING
+            id,
+            name,
+            email,
+            mobile_number
+          `,
+          [name, email]
+        );
+
+        user = userResult.rows[0];
+      }
+
+      // 6. Link Facebook account
+      await client.query(
+        `
+        INSERT INTO user_auth_providers (
+          user_id,
+          provider,
+          provider_user_id,
+          email
+        )
+        VALUES ($1, 'facebook', $2, $3)
+        ON CONFLICT (provider, provider_user_id)
+        DO UPDATE SET
+          email = EXCLUDED.email,
+          updated_at = CURRENT_TIMESTAMP
+        `,
+        [
+          user.id,
+          facebookUserId,
+          email
+        ]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    // 7. Generate HerSolace JWT
+    const token = generateToken({
+      userId: user.id
+    });
+
+    return res.json({
+      success: true,
+      message: "Facebook login successful",
+      userId: user.id,
+      token,
+      isNewUser: !providerResult.rows.length,
+      user
+    });
+
+  } catch (error) {
+    await client.query("ROLLBACK");
+
+    console.error("Facebook login error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Facebook login failed"
+    });
+
+  } finally {
+    client.release();
   }
 };
