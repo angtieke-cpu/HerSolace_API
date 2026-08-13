@@ -152,17 +152,16 @@ exports.getCyclePrediction = async (req, res) => {
         const oldGuideData = oldGuide.rows[0] || {};
         const newGuideData = newGuide.rows[0] || {};
 
-        // Extract fields that need to be combined
         const {
             hormone_changes,
             nutrients,
             fitness,
-            insights,
-            ...otherGuideData
+            insights
         } = newGuideData;
 
-        // Combine all four fields into daily_highlight
-        const combinedDailyHighlight = [
+        // Combine the fields into daily_highlights
+        // BUT KEEP THE ORIGINAL FIELDS AS WELL
+        const dailyHighlights = [
             hormone_changes
                 ? `Hormone Changes: ${hormone_changes}`
                 : null,
@@ -184,9 +183,10 @@ exports.getCyclePrediction = async (req, res) => {
 
         const cycleGuide = {
             ...oldGuideData,
-            ...otherGuideData,
+            ...newGuideData,
 
-            daily_highlight: combinedDailyHighlight,
+            // Additional combined field
+            daily_highlights: dailyHighlights,
         };
 
         // 7️⃣ Response
