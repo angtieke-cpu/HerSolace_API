@@ -250,17 +250,18 @@ exports.linkUserProfile = async (req, res) => {
 
 exports.getLinkedProfiles = async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const userId = req.user?.userId;
 
     if (!userId) {
       return res.status(400).json({
+        success: false,
         message: "userid header required"
       });
     }
 
     const result = await db.query(
       `
-      SELECT 
+      SELECT
         u.id,
         u.name,
         u.mobile_number,
@@ -268,22 +269,43 @@ exports.getLinkedProfiles = async (req, res) => {
         uplink.relationship,
         uplink.status,
 
-        upl.period_date AS last_period_date,
-        upl.bleeding_days,
-        upl.cycle_length
+        latest.period_date AS last_period_date,
+        latest.bleeding_days,
+        latest.cycle_length,
+
+        COALESCE(recent.recent_cycles, '[]'::jsonb) AS recent_cycles
 
       FROM user_profile_links uplink
 
-      JOIN users u 
+      JOIN users u
         ON u.id = uplink.linked_user_id
 
-      LEFT JOIN user_period_log upl
-        ON upl.user_id = u.id
-        AND upl.period_date = (
-          SELECT MAX(period_date)
-          FROM user_period_log
-          WHERE user_id = u.id
-        )
+      -- Latest period log
+      LEFT JOIN LATERAL (
+        SELECT
+          period_date,
+          bleeding_days,
+          cycle_length
+        FROM user_period_log
+        WHERE user_id = u.id
+        ORDER BY period_date DESC
+        LIMIT 1
+      ) latest ON true
+
+      -- ALL period logs
+      LEFT JOIN LATERAL (
+        SELECT
+          jsonb_agg(
+            jsonb_build_object(
+              'periodDate', period_date,
+              'bleedingDays', bleeding_days,
+              'cycleLength', cycle_length
+            )
+            ORDER BY period_date DESC
+          ) AS recent_cycles
+        FROM user_period_log
+        WHERE user_id = u.id
+      ) recent ON true
 
       WHERE uplink.user_id = $1
         AND uplink.status = 'approved'
@@ -294,18 +316,36 @@ exports.getLinkedProfiles = async (req, res) => {
       [userId]
     );
 
+    const data = result.rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      mobile_number: row.mobile_number,
+
+      relationship: row.relationship,
+      status: row.status,
+
+      lastPeriod: row.last_period_date,
+      bleedingDays: row.bleeding_days,
+      cycleLength: row.cycle_length,
+
+      recentCycles: row.recent_cycles || []
+    }));
+
     return res.json({
       success: true,
-      count: result.rows.length,
-      data: result.rows
+      count: data.length,
+      data
     });
 
   } catch (error) {
     console.error("Get linked profiles error:", error);
-    return res.status(500).json({ message: "Server error" });
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
   }
 };
-
 exports.getUserBymobile = async (req, res) => {
   try {
     const userId = req.user.userId;
