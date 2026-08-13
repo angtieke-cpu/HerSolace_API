@@ -151,44 +151,32 @@ exports.getCyclePrediction = async (req, res) => {
 
       // 6️⃣ Combine cycle guide data
 
+// 6️⃣ Combine cycle guide data
+
 const oldGuideData = oldGuide.rows[0] || {};
 const newGuideData = newGuide.rows[0] || {};
 
 const {
-    daily_higlight,
+    daily_highlight,
     nutrients,
     fitness,
     insights
 } = newGuideData;
 
-// Keep the existing daily_higlight value
-// and append nutrients, fitness and insights
 const combinedDailyHighlight = [
-    daily_higlight
-        ? `Daily Highlight: ${daily_higlight}`
-        : null,
-
-    nutrients
-        ? `Nutrients: ${nutrients}`
-        : null,
-
-    fitness
-        ? `Fitness: ${fitness}`
-        : null,
-
+    daily_highlight,
+    nutrients,
+    fitness,
     insights
-        ? `Insights: ${insights}`
-        : null
 ]
-    .filter(Boolean)
-    .join(" | ");
+    .filter(value => value !== null && value !== undefined && value !== "")
+    .join(". ");
 
 const cycleGuide = {
     ...oldGuideData,
     ...newGuideData,
 
-    // Override existing daily_higlight with combined value
-    daily_higlight: combinedDailyHighlight
+    daily_highlight: combinedDailyHighlight
 };
 
         // 7️⃣ Response
