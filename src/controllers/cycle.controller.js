@@ -149,45 +149,47 @@ exports.getCyclePrediction = async (req, res) => {
 
         // 6️⃣ Combine cycle guide data
 
-        const oldGuideData = oldGuide.rows[0] || {};
-        const newGuideData = newGuide.rows[0] || {};
+      // 6️⃣ Combine cycle guide data
 
-        const {
-            hormone_changes,
-            nutrients,
-            fitness,
-            insights
-        } = newGuideData;
+const oldGuideData = oldGuide.rows[0] || {};
+const newGuideData = newGuide.rows[0] || {};
 
-        // Combine the fields into daily_highlights
-        // BUT KEEP THE ORIGINAL FIELDS AS WELL
-        const dailyHighlights = [
-            hormone_changes
-                ? `Hormone Changes: ${hormone_changes}`
-                : null,
+const {
+    daily_higlight,
+    nutrients,
+    fitness,
+    insights
+} = newGuideData;
 
-            nutrients
-                ? `Nutrients: ${nutrients}`
-                : null,
+// Keep the existing daily_higlight value
+// and append nutrients, fitness and insights
+const combinedDailyHighlight = [
+    daily_higlight
+        ? `Daily Highlight: ${daily_higlight}`
+        : null,
 
-            fitness
-                ? `Fitness: ${fitness}`
-                : null,
+    nutrients
+        ? `Nutrients: ${nutrients}`
+        : null,
 
-            insights
-                ? `Insights: ${insights}`
-                : null,
-        ]
-            .filter(Boolean)
-            .join(" | ");
+    fitness
+        ? `Fitness: ${fitness}`
+        : null,
 
-        const cycleGuide = {
-            ...oldGuideData,
-            ...newGuideData,
+    insights
+        ? `Insights: ${insights}`
+        : null
+]
+    .filter(Boolean)
+    .join(" | ");
 
-            // Additional combined field
-            daily_highlights: dailyHighlights,
-        };
+const cycleGuide = {
+    ...oldGuideData,
+    ...newGuideData,
+
+    // Override existing daily_higlight with combined value
+    daily_higlight: combinedDailyHighlight
+};
 
         // 7️⃣ Response
 
