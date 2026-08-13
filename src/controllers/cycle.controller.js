@@ -21,28 +21,28 @@ exports.getCyclePrediction = async (req, res) => {
         // 1️⃣ Get base data
         const result = await db.query(
             `
-      SELECT 
-  u.name,
+            SELECT 
+                u.name,
 
-  lp.period_date AS last_period_date,
-  lp.bleeding_days,
-  lp.cycle_length AS cycle_length_days
+                lp.period_date AS last_period_date,
+                lp.bleeding_days,
+                lp.cycle_length AS cycle_length_days
 
-FROM users u
+            FROM users u
 
-LEFT JOIN LATERAL (
-  SELECT 
-    period_date,
-    bleeding_days,
-    cycle_length
-  FROM user_period_log
-  WHERE user_id = u.id
-  ORDER BY period_date DESC
-  LIMIT 1
-) lp ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT 
+                    period_date,
+                    bleeding_days,
+                    cycle_length
+                FROM user_period_log
+                WHERE user_id = u.id
+                ORDER BY period_date DESC
+                LIMIT 1
+            ) lp ON TRUE
 
-WHERE u.id = $1;
-      `,
+            WHERE u.id = $1;
+            `,
             [userId]
         );
 
@@ -88,7 +88,9 @@ WHERE u.id = $1;
             today.getTime() - lastPeriodDate.getTime();
 
         const diffDays =
-            Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+            Math.floor(
+                diffTime / (1000 * 60 * 60 * 24)
+            ) + 1;
 
         let adjustedCycleLength =
             Number(cycle_length_days) || 28;
@@ -103,6 +105,7 @@ WHERE u.id = $1;
             adjustedCycleLength =
                 adjustedCycleLength + delayDays;
         }
+
         // 3️⃣ Calculate cycle
 
         const cycleData = calculateCycle({
@@ -111,72 +114,104 @@ WHERE u.id = $1;
             bleedingDays: bleeding_days,
         });
 
-        const { phase, stage, currentDay } = cycleData;
+        const {
+            phase,
+            stage,
+            currentDay
+        } = cycleData;
 
-
-
-
-
-        // 4️⃣ OLD TABLE (minimal fields)
+        // 4️⃣ OLD TABLE
         const oldGuide = await db.query(
             `
-      SELECT
-        cycle_day,
-        phase_of_month,
-        phase_in_app,
-        estrogen_level,
-        progesterone_level
-      FROM cycle_guide
-      WHERE cycle_day = $1
-      `,
+            SELECT
+                cycle_day,
+                phase_of_month,
+                phase_in_app,
+                estrogen_level,
+                progesterone_level
+            FROM cycle_guide
+            WHERE cycle_day = $1
+            `,
             [currentDay]
         );
 
-        // 5️⃣ NEW TABLE (range + stage match)
+        // 5️⃣ NEW TABLE
         const newGuide = await db.query(
             `
-      SELECT *
-      FROM cycle_phase_guidelines
-      WHERE phase_name = $1
-      AND stage = $2
-      LIMIT 1
-      `,
+            SELECT *
+            FROM cycle_phase_guidelines
+            WHERE phase_name = $1
+              AND stage = $2
+            LIMIT 1
+            `,
             [phase, stage]
         );
 
+        // 6️⃣ Combine cycle guide data
+
+        const oldGuideData = oldGuide.rows[0] || {};
+        const newGuideData = newGuide.rows[0] || {};
+
+        // Extract the fields that need to be combined
+        const {
+            hormone_changes,
+            nutrients,
+            fitness,
+            insights,
+            ...otherGuideData
+        } = newGuideData;
+
+        // Combine all four fields into hormone_changes
+        const combinedHormoneChanges = [
+            hormone_changes
+                ? `Hormone Changes: ${hormone_changes}`
+                : null,
+
+            nutrients
+                ? `Nutrients: ${nutrients}`
+                : null,
+
+            fitness
+                ? `Fitness: ${fitness}`
+                : null,
+
+            insights
+                ? `Insights: ${insights}`
+                : null,
+        ]
+            .filter(Boolean)
+            .join(" | ");
 
         const cycleGuide = {
-            ...(oldGuide.rows[0] || {}),
-            ...(newGuide.rows[0] || {}),
+            ...oldGuideData,
+            ...otherGuideData,
+
+            hormone_changes: combinedHormoneChanges,
         };
 
-        // 6️⃣ Response
-        res.json({
+        // 7️⃣ Response
+
+        return res.json({
             success: true,
             data: {
                 username: name,
 
                 ...cycleData,
+
                 delayDays,
-
-
                 adjustedCycleLength,
-
-
-
-
 
                 cycleGuide,
             },
         });
 
     } catch (error) {
-        console.error("Cycle prediction error:", error);
-        res.status(500).json({
+        console.error(
+            "Cycle prediction error:",
+            error
+        );
 
-
-
-
+        return res.status(500).json({
             message: "Failed to calculate cycle",
         });
     }
