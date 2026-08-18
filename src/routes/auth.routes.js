@@ -7,7 +7,8 @@ const {
   verifyOtp,
   facebookLogin,
   googleLogin,
-  registerPushToken
+  registerPushToken,
+  sendNotification
 
 } = require("../controllers/auth.controller");
 
@@ -26,5 +27,8 @@ router.post(
   "/register-token",
   registerPushToken
 );
-
+router.post(
+  "/send-notification",
+  sendNotification
+);
 module.exports = router;
