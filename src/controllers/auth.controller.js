@@ -4,7 +4,7 @@ const { sendOtpSms } = require('../utils/twilio');
 const { OAuth2Client } = require("google-auth-library");
 const {
   sendPushNotification,
-} = require("../utils/pushNotification");
+} = require("../utils/notification");
 
 const googleClient = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID
