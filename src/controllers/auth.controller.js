@@ -603,3 +603,93 @@ exports.sendPushNotification = async (pushToken, title, body, data = {}) => {
     console.error("Push notification error:", error);
   }
 };
+exports.registerPushToken = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+
+    const {
+      pushToken,
+      platform
+    } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID required"
+      });
+    }
+
+    if (!pushToken) {
+      return res.status(400).json({
+        success: false,
+        message: "Push token required"
+      });
+    }
+
+    if (!["android", "ios"].includes(platform)) {
+      return res.status(400).json({
+        success: false,
+        message: "Platform must be android or ios"
+      });
+    }
+
+    // Verify that the user exists
+    const userResult = await db.query(
+      `
+      SELECT id
+      FROM users
+      WHERE id = $1
+      `,
+      [userId]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    // Insert token or update existing token
+    const result = await db.query(
+      `
+      INSERT INTO user_push_tokens (
+        user_id,
+        push_token,
+        platform,
+        is_active,
+        updated_at
+      )
+      VALUES ($1, $2, $3, TRUE, CURRENT_TIMESTAMP)
+      ON CONFLICT (user_id, push_token)
+      DO UPDATE SET
+        platform = EXCLUDED.platform,
+        is_active = TRUE,
+        updated_at = CURRENT_TIMESTAMP
+      RETURNING
+        id,
+        user_id AS "userId",
+        push_token AS "pushToken",
+        platform,
+        is_active AS "isActive",
+        created_at AS "createdAt",
+        updated_at AS "updatedAt"
+      `,
+      [userId, pushToken, platform]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Push token registered successfully",
+      data: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error("Register push token error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to register push token"
+    });
+  }
+};
