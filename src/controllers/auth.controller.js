@@ -2,6 +2,9 @@ const db = require('../db');
 const { generateToken } = require('../utils/jwt');
 const { sendOtpSms } = require('../utils/twilio');
 const { OAuth2Client } = require("google-auth-library");
+const {
+  sendPushNotification,
+} = require("../utils/pushNotification");
 
 const googleClient = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID
@@ -660,6 +663,83 @@ exports.registerPushToken = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to register push token"
+    });
+  }
+};
+exports.sendNotification = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+
+    const {
+      title,
+      body,
+      data = {},
+    } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID required",
+      });
+    }
+
+    if (!title) {
+      return res.status(400).json({
+        success: false,
+        message: "Notification title required",
+      });
+    }
+
+    if (!body) {
+      return res.status(400).json({
+        success: false,
+        message: "Notification body required",
+      });
+    }
+
+    // Get all active push tokens for this user
+    const result = await db.query(
+      `
+      SELECT
+        id,
+        push_token,
+        platform
+      FROM user_push_tokens
+      WHERE user_id = $1
+        AND is_active = TRUE
+      `,
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No active push token found for this user",
+      });
+    }
+
+    // Send notification to all user's devices
+    for (const tokenData of result.rows) {
+      await sendPushNotification(
+        tokenData.push_token,
+        title,
+        body,
+        data
+      );
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Notification sent successfully",
+      devices: result.rows.length,
+    });
+
+  } catch (error) {
+    console.error("Send notification error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send notification",
     });
   }
 };
