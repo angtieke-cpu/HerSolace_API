@@ -1,6 +1,4 @@
-const { Expo } = require("expo-server-sdk");
-
-const expo = new Expo();
+const expoPromise = import("expo-server-sdk");
 
 exports.sendPushNotification = async (
   pushToken,
@@ -9,6 +7,10 @@ exports.sendPushNotification = async (
   data = {}
 ) => {
   try {
+    const { Expo } = await expoPromise;
+
+    const expo = new Expo();
+
     if (!Expo.isExpoPushToken(pushToken)) {
       console.log("Invalid Expo push token:", pushToken);
       return;
@@ -31,7 +33,9 @@ exports.sendPushNotification = async (
 
       console.log("Notification tickets:", tickets);
     }
+
   } catch (error) {
     console.error("Push notification error:", error);
+    throw error;
   }
 };
