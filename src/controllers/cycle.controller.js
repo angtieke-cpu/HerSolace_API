@@ -153,6 +153,8 @@ exports.getCyclePrediction = async (req, res) => {
 
 // 6️⃣ Combine cycle guide data
 
+// 6️⃣ Combine cycle guide data
+
 const oldGuideData = oldGuide.rows[0] || {};
 const newGuideData = newGuide.rows[0] || {};
 
@@ -170,7 +172,7 @@ const combinedDailyHighlight = [
     insights
 ]
     .filter(value => value !== null && value !== undefined && value !== "")
-    .join(". ");
+    .map(value => String(value).trim());
 
 const cycleGuide = {
     ...oldGuideData,
