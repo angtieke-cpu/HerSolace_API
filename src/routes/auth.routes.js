@@ -6,7 +6,8 @@ const {
   login,
   verifyOtp,
   facebookLogin,
-  googleLogin
+  googleLogin,
+  registerPushToken
 
 } = require("../controllers/auth.controller");
 
@@ -20,6 +21,10 @@ router.post(
 router.post(
   "/facebook",
   facebookLogin
+);
+router.post(
+  "/register-token",
+  registerPushToken
 );
 
 module.exports = router;
