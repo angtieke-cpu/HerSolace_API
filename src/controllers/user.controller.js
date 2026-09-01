@@ -141,43 +141,63 @@ WHERE id = (
 
 exports.linkUserProfile = async (req, res) => {
   try {
-    const requestedBy = req.user.userId;
+    const requestedBy = req.user?.userId;
     const { mobile_number, relationship } = req.body;
 
     if (!requestedBy) {
-      return res.status(400).json({ message: "userid header required" });
+      return res.status(400).json({
+        success: false,
+        message: "userid header required"
+      });
     }
 
     if (!mobile_number || !relationship) {
       return res.status(400).json({
+        success: false,
         message: "mobile_number and relationship required"
       });
     }
 
+    const searchValue = String(mobile_number).trim();
+
+    // Find the person whose profile is being requested.
+    // mobile_number is kept as the common frontend field.
     const userResult = await db.query(
-      `SELECT id FROM users WHERE mobile_number = $1`,
-      [mobile_number]
+      `
+      SELECT id
+      FROM users
+      WHERE
+        mobile_number::TEXT = $1
+        OR email = $1
+        OR user_number::TEXT = $1
+      LIMIT 1
+      `,
+      [searchValue]
     );
 
     if (userResult.rows.length === 0) {
       return res.status(404).json({
-        message: "User with this mobile number not found"
+        success: false,
+        message: "User not found"
       });
     }
 
     const linkedUserId = userResult.rows[0].id;
 
+    // Cannot request your own profile
     if (String(linkedUserId) === String(requestedBy)) {
       return res.status(400).json({
+        success: false,
         message: "Cannot link your own profile"
       });
     }
 
+    // Check existing request
     const existing = await db.query(
       `
       SELECT *
       FROM user_profile_links
-      WHERE requested_by = $1
+      WHERE user_id = $1
         AND linked_user_id = $2
       LIMIT 1
       `,
@@ -189,29 +209,34 @@ exports.linkUserProfile = async (req, res) => {
 
       if (link.is_blocked || link.status === "blocked") {
         return res.status(403).json({
+          success: false,
           message: "Profile link request blocked after 3 rejections"
         });
       }
 
       if (link.status === "pending") {
         return res.status(400).json({
+          success: false,
           message: "Approval already pending"
         });
       }
 
       if (link.status === "approved") {
         return res.status(400).json({
+          success: false,
           message: "Profile already linked"
         });
       }
 
+      // Re-send rejected request
       await db.query(
         `
         UPDATE user_profile_links
-        SET status = 'pending',
-            relationship = $1,
-            rejected_at = NULL,
-            created_at = CURRENT_TIMESTAMP
+        SET
+          status = 'pending',
+          relationship = $1,
+          rejected_at = NULL,
+          created_at = CURRENT_TIMESTAMP
         WHERE id = $2
         `,
         [relationship, link.id]
@@ -223,6 +248,7 @@ exports.linkUserProfile = async (req, res) => {
       });
     }
 
+    // Create new request
     await db.query(
       `
       INSERT INTO user_profile_links
@@ -231,11 +257,24 @@ exports.linkUserProfile = async (req, res) => {
         linked_user_id,
         relationship,
         requested_by,
-        status
+        status,
+        is_blocked
       )
-      VALUES ($1, $2, $3, $4, 'pending')
+      VALUES
+      (
+        $1,
+        $2,
+        $3,
+        $1,
+        'pending',
+        false
+      )
       `,
-      [requestedBy, linkedUserId, relationship, requestedBy]
+      [
+        requestedBy,
+        linkedUserId,
+        relationship
+      ]
     );
 
     return res.json({
@@ -245,7 +284,11 @@ exports.linkUserProfile = async (req, res) => {
 
   } catch (error) {
     console.error("Link profile error:", error);
-    return res.status(500).json({ message: "Server error" });
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
   }
 };
 exports.getLinkedProfiles = async (req, res) => {
