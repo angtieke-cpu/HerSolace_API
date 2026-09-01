@@ -353,19 +353,26 @@ exports.getUserBymobile = async (req, res) => {
 
     if (!userId) {
       return res.status(400).json({
+        success: false,
         message: "userid header required"
       });
     }
 
-    const { mobile_number, email, user_number } = req.body;
+    // Keep mobile_number as the common request field
+    const { mobile_number } = req.body;
 
-    // At least one search field is required
-    if (!mobile_number && !email && !user_number) {
+    if (
+      mobile_number === undefined ||
+      mobile_number === null ||
+      mobile_number === ""
+    ) {
       return res.status(400).json({
         success: false,
-        message: "mobile_number, email or user_number is required"
+        message: "mobile_number is required"
       });
     }
+
+    const searchValue = String(mobile_number).trim();
 
     const result = await db.query(
       `
@@ -392,19 +399,13 @@ exports.getUserBymobile = async (req, res) => {
       ) upl ON upl.user_id = u.id
 
       WHERE
-        ($1 IS NOT NULL AND u.mobile_number = $1)
-        OR
-        ($2 IS NOT NULL AND u.email = $2)
-        OR
-        ($3 IS NOT NULL AND u.user_number = $3)
+        u.mobile_number::TEXT = $1
+        OR u.email = $1
+        OR u.user_number::TEXT = $1
 
       LIMIT 1;
       `,
-      [
-        mobile_number || null,
-        email || null,
-        user_number || null
-      ]
+      [searchValue]
     );
 
     if (result.rows.length === 0) {
@@ -428,7 +429,6 @@ exports.getUserBymobile = async (req, res) => {
     });
   }
 };
-
 exports.getTaggedLinkedUsers = async (req, res) => {
   try {
     const userId = req.user.userId;
