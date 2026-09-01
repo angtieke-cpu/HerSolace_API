@@ -349,46 +349,83 @@ exports.getLinkedProfiles = async (req, res) => {
 };
 exports.getUserBymobile = async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const userId = req.user?.userId;
 
     if (!userId) {
       return res.status(400).json({
         message: "userid header required"
       });
     }
-    const { mobile_number } = req.body;
+
+    const { mobile_number, email, user_number } = req.body;
+
+    // At least one search field is required
+    if (!mobile_number && !email && !user_number) {
+      return res.status(400).json({
+        success: false,
+        message: "mobile_number, email or user_number is required"
+      });
+    }
+
     const result = await db.query(
       `
-  SELECT 
-  u.id,
-  u.name,
-  u.mobile_number,
-  upl.cycle_length,
-  upl.bleeding_days,
-  upl.period_date AS last_period_date
+      SELECT 
+        u.id,
+        u.user_number,
+        u.name,
+        u.mobile_number,
+        u.email,
+        upl.cycle_length,
+        upl.bleeding_days,
+        upl.period_date AS last_period_date
 
-FROM users u
+      FROM users u
 
-LEFT JOIN (
-  SELECT DISTINCT ON (user_id)
-    user_id,
-    cycle_length,
-    bleeding_days,
-    period_date
-  FROM user_period_log
-  ORDER BY user_id, period_date DESC
-) upl ON upl.user_id = u.id
+      LEFT JOIN (
+        SELECT DISTINCT ON (user_id)
+          user_id,
+          cycle_length,
+          bleeding_days,
+          period_date
+        FROM user_period_log
+        ORDER BY user_id, period_date DESC
+      ) upl ON upl.user_id = u.id
 
-WHERE u.mobile_number = $1;
-  `,
-      [mobile_number]
+      WHERE
+        ($1 IS NOT NULL AND u.mobile_number = $1)
+        OR
+        ($2 IS NOT NULL AND u.email = $2)
+        OR
+        ($3 IS NOT NULL AND u.user_number = $3)
+
+      LIMIT 1;
+      `,
+      [
+        mobile_number || null,
+        email || null,
+        user_number || null
+      ]
     );
 
-    res.json(result.rows);
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: result.rows[0]
+    });
 
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("getUserBymobile error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
   }
 };
 
