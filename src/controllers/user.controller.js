@@ -248,7 +248,6 @@ exports.linkUserProfile = async (req, res) => {
     return res.status(500).json({ message: "Server error" });
   }
 };
-
 exports.getLinkedProfiles = async (req, res) => {
   try {
     const userId = req.user?.userId;
@@ -266,6 +265,7 @@ exports.getLinkedProfiles = async (req, res) => {
         u.id,
         u.name,
         u.mobile_number,
+        u.anonymous_mode,
 
         uplink.relationship,
         uplink.status,
@@ -317,20 +317,30 @@ exports.getLinkedProfiles = async (req, res) => {
       [userId]
     );
 
-    const data = result.rows.map(row => ({
-      id: row.id,
-      name: row.name,
-      mobile_number: row.mobile_number,
+    const data = result.rows.map(row => {
+      const isAnonymous = row.anonymous_mode === true;
 
-      relationship: row.relationship,
-      status: row.status,
+      return {
+        id: row.id,
 
-      lastPeriod: row.last_period_date,
-      bleedingDays: row.bleeding_days,
-      cycleLength: row.cycle_length,
+        name: isAnonymous
+          ? "****"
+          : row.name,
 
-      recentCycles: row.recent_cycles || []
-    }));
+        mobile_number: isAnonymous
+          ? "**********"
+          : row.mobile_number,
+
+        relationship: row.relationship,
+        status: row.status,
+
+        lastPeriod: row.last_period_date,
+        bleedingDays: row.bleeding_days,
+        cycleLength: row.cycle_length,
+
+        recentCycles: row.recent_cycles || []
+      };
+    });
 
     return res.json({
       success: true,
@@ -347,6 +357,8 @@ exports.getLinkedProfiles = async (req, res) => {
     });
   }
 };
+
+
 exports.getUserBymobile = async (req, res) => {
   try {
     const userId = req.user?.userId;
