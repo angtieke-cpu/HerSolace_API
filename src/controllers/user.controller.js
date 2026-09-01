@@ -322,9 +322,9 @@ exports.getLinkedProfiles = async (req, res) => {
       FROM user_profile_links uplink
 
       JOIN users u
-        ON u.id = uplink.linked_user_id
+        ON u.id = uplink.user_id
 
-      -- Latest period log
+      -- Latest period log of the profile owner (A)
       LEFT JOIN LATERAL (
         SELECT
           period_date,
@@ -336,7 +336,7 @@ exports.getLinkedProfiles = async (req, res) => {
         LIMIT 1
       ) latest ON true
 
-      -- ALL period logs
+      -- All period logs of the profile owner (A)
       LEFT JOIN LATERAL (
         SELECT
           jsonb_agg(
@@ -351,7 +351,7 @@ exports.getLinkedProfiles = async (req, res) => {
         WHERE user_id = u.id
       ) recent ON true
 
-      WHERE uplink.user_id = $1
+      WHERE uplink.linked_user_id = $1
         AND uplink.status = 'approved'
         AND uplink.is_blocked = false
 
