@@ -20,6 +20,7 @@ exports.getUserProfile = async (req, res) => {
     u.name,
     u.email,
     u.mobile_number,
+    u.user_number,
     u.image_base64,
     u.is_verified,
     upl.period_date AS last_period_date,
