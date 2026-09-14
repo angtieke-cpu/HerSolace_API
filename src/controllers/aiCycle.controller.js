@@ -3,9 +3,15 @@ const db = require("../db");
 const OpenAI = require("openai");
 const utc = require("dayjs/plugin/utc");
 const timezone = require("dayjs/plugin/timezone");
+const { calculateCycle } = require("../utils/cycleCalculator");
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
+
+/** Short phase label ("Menstrual") from calculateCycle()'s long one ("Menstrual Phase") — kept
+ *  so the AI prompt wording here doesn't change, while the underlying day/phase math now comes
+ *  from the same shared calculator Home and Calendar use. */
+const shortPhase = (phase) => phase.replace(/\s*Phase$/, "");
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
@@ -50,45 +56,20 @@ exports.getAiCycleInsights = async (req, res) => {
             bleeding_days
         } = result.rows[0];
 
-        // ✅ 2. Indian timezone date logic
-        const today = dayjs().tz("Asia/Kolkata");
+        // ✅ 2. Cycle day/phase/delay — same shared calculator Home (getCyclePrediction) and
+        // Calendar (getCycleCalendarDetails) use, so the AI's prompt can't disagree with what
+        // those screens are showing. (Previously this reimplemented its own math assuming a
+        // fixed 28-day cycle — ovulation always "day 14" — which was wrong for anyone with a
+        // different cycle length and a common source of the AI screen showing a different day
+        // than Home/Calendar.)
+        const cycleData = calculateCycle({
+            lastPeriodDate: last_period_date,
+            cycleLength: Number(cycle_length_days) || 28,
+            bleedingDays: bleeding_days,
+        });
 
-        const startDate = dayjs(last_period_date)
-            .tz("Asia/Kolkata");
-
-        // ✅ Actual elapsed days
-        const diffDays = today.diff(startDate, "day") + 1;
-
-        // ✅ Delay logic
-        let adjustedCycleLength =
-            Number(cycle_length_days) || 28;
-
-        let delayDays = 0;
-
-        if (diffDays > adjustedCycleLength) {
-            delayDays =
-                diffDays - adjustedCycleLength;
-
-            adjustedCycleLength =
-                adjustedCycleLength + delayDays;
-        }
-
-        // ✅ Current cycle day
-        const currentDay =
-            ((diffDays - 1) % adjustedCycleLength) + 1;
-
-        // ✅ Determine phase
-        let phase = "";
-
-        if (currentDay <= bleeding_days) {
-            phase = "Menstrual";
-        } else if (currentDay <= 13) {
-            phase = "Follicular";
-        } else if (currentDay === 14) {
-            phase = "Ovulation";
-        } else {
-            phase = "Luteal";
-        }
+        const { currentDay, delayDays, adjustedCycleLength } = cycleData;
+        const phase = shortPhase(cycleData.phase);
 
         // ✅ 3. Check cache
         const cache = await db.query(
@@ -256,62 +237,18 @@ exports.getAiCycleInsightsWithInput = async (req, res) => {
             bleeding_days
         } = result.rows[0];
 
-        // ✅ Indian timezone
-        const today = dayjs().tz("Asia/Kolkata");
+        // ✅ Cycle day/phase/delay — same shared calculator Home and Calendar use (see
+        // getAiCycleInsights above). Previously this used its own ovulation-day formula
+        // (cycleLength / 2) instead of the cycleLength - 14 every other endpoint uses, which
+        // disagreed with Home/Calendar for anyone whose cycle isn't exactly 28 days.
+        const cycleData = calculateCycle({
+            lastPeriodDate: last_period_date,
+            cycleLength: Number(cycle_length_days) || 28,
+            bleedingDays: bleeding_days,
+        });
 
-        const startDate = dayjs(last_period_date)
-            .tz("Asia/Kolkata");
-
-        // ✅ Actual elapsed days
-        const diffDays =
-            today.diff(startDate, "day") + 1;
-
-        // ✅ Delay logic
-        let adjustedCycleLength =
-            Number(cycle_length_days) || 28;
-
-        let delayDays = 0;
-
-        if (diffDays > adjustedCycleLength) {
-            delayDays =
-                diffDays - adjustedCycleLength;
-
-            adjustedCycleLength =
-                adjustedCycleLength + delayDays;
-        }
-
-        // ✅ Current cycle day
-        const currentDay =
-            ((diffDays - 1) % adjustedCycleLength) + 1;
-
-        // ✅ Phase logic
-        let phase = "";
-
-        const ovulationDay = Math.floor(
-            adjustedCycleLength / 2
-        );
-
-        if (currentDay <= bleeding_days) {
-            phase = "Menstrual";
-
-        } else if (currentDay < ovulationDay - 2) {
-            phase = "Follicular";
-
-        } else if (
-            currentDay >= ovulationDay - 2 &&
-            currentDay <= ovulationDay + 2
-        ) {
-            phase = "Ovulation";
-
-        } else if (
-            currentDay > ovulationDay + 2 &&
-            currentDay <= adjustedCycleLength
-        ) {
-            phase = "Luteal";
-
-        } else {
-            phase = "Delayed";
-        }
+        const { currentDay, delayDays, adjustedCycleLength } = cycleData;
+        const phase = cycleData.isOverdue ? "Delayed" : shortPhase(cycleData.phase);
 
         // ✅ Prompt
         const prompt = `
