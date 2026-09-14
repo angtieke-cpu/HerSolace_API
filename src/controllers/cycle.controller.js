@@ -1,5 +1,5 @@
 const db = require("../db");
-const { calculateCycle } = require("../utils/cycleCalculator");
+const { calculateCycle, resolveEffectiveCycleStart } = require("../utils/cycleCalculator");
 const dayjs = require("dayjs");
 const utc = require("dayjs/plugin/utc");
 const timezone = require("dayjs/plugin/timezone");
@@ -65,59 +65,21 @@ exports.getCyclePrediction = async (req, res) => {
             });
         }
 
-        // 2️⃣ Calculate delay-based cycle adjustment
-
-        const today = new Date(
-            new Date().toLocaleString("en-US", {
-                timeZone: "Asia/Kolkata",
-            })
-        );
-
-        const lastPeriodDate = new Date(
-            new Date(last_period_date).toLocaleString("en-US", {
-                timeZone: "Asia/Kolkata",
-            })
-        );
-
-        // Normalize both dates
-        today.setHours(0, 0, 0, 0);
-        lastPeriodDate.setHours(0, 0, 0, 0);
-
-        // Difference
-        const diffTime =
-            today.getTime() - lastPeriodDate.getTime();
-
-        const diffDays =
-            Math.floor(
-                diffTime / (1000 * 60 * 60 * 24)
-            ) + 1;
-
-        let adjustedCycleLength =
-            Number(cycle_length_days) || 28;
-
-        let delayDays = 0;
-
-        // 👉 If user missed logging
-        if (diffDays > adjustedCycleLength) {
-            delayDays =
-                diffDays - adjustedCycleLength;
-
-            adjustedCycleLength =
-                adjustedCycleLength + delayDays;
-        }
-
-        // 3️⃣ Calculate cycle
+        // 2️⃣ Calculate cycle — today's day/phase, and the "missed cycle" delay adjustment,
+        // both come from the one shared calculateCycle() util now (same algorithm the Calendar
+        // and AI endpoints use), instead of this endpoint working it out separately and
+        // sometimes landing on a different day/phase than the other screens.
 
         const cycleData = calculateCycle({
-            lastPeriodDate: lastPeriodDate,
-            cycleLength: adjustedCycleLength,
+            lastPeriodDate: last_period_date,
+            cycleLength: Number(cycle_length_days) || 28,
             bleedingDays: bleeding_days,
         });
 
         const {
             phase,
             stage,
-            currentDay
+            currentDay,
         } = cycleData;
 
         // 4️⃣ OLD TABLE
@@ -188,10 +150,9 @@ const cycleGuide = {
             data: {
                 username: name,
 
+                // Includes delayDays/adjustedCycleLength already — calculateCycle() computes
+                // both as part of the same missed-cycle rollover it uses for currentDay/phase.
                 ...cycleData,
-
-                delayDays,
-                adjustedCycleLength,
 
                 cycleGuide,
             },
@@ -1261,32 +1222,19 @@ exports.getCycleCalendarDetails = async (req, res) => {
       Number(lastRecord.bleedingDays) || 5;
 
     // ---------------------------------------------------------
-    // 4. Effective current-cycle start
-    // Same missed-cycle logic as frontend
+    // 4. Effective current-cycle start — shared with getCyclePrediction (Home) and the AI
+    // endpoints via cycleCalculator's resolveEffectiveCycleStart, so all three can't disagree
+    // on which cycle "today" actually falls in.
     // ---------------------------------------------------------
 
-    let effectiveCycleStart = lastPeriod;
+    const { effectiveStart: effectiveCycleStart, missedFullCycles } =
+      resolveEffectiveCycleStart(lastPeriod, cycleLength, today);
 
     /*
-     * True when at least one expected period date has already
-     * passed without a new DB entry confirming it started -
-     * i.e. the period is currently overdue.
+     * True once at least one whole cycle has unambiguously been missed (not just today running
+     * a little late) - i.e. a cycle silently started and ended without a new DB entry.
      */
-    let missedCycleDetected = false;
-
-    while (
-      effectiveCycleStart
-        .add(cycleLength, "day")
-        .isBefore(today, "day")
-    ) {
-      effectiveCycleStart =
-        effectiveCycleStart.add(
-          cycleLength,
-          "day"
-        );
-
-      missedCycleDetected = true;
-    }
+    const missedCycleDetected = missedFullCycles > 0;
 
     // ---------------------------------------------------------
     // 5. Current cycle prediction
