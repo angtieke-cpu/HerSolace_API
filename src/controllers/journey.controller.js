@@ -9,6 +9,7 @@ exports.saveJourneyDetails = async (req, res) => {
 
     if (!userId) {
       return res.status(400).json({
+        success: false,
         message: "userId required",
       });
     }
@@ -35,36 +36,86 @@ exports.saveJourneyDetails = async (req, res) => {
       !lastPeriodDate
     ) {
       return res.status(400).json({
+        success: false,
         message: "Missing journey details",
       });
     }
 
-    // 🔍 STEP 0: Get mobile number from temp_users
-    const tempUserCheck = await client.query(
-      `SELECT mobile_number FROM temp_users WHERE id = $1`,
+    /*
+     * STEP 0
+     * Determine whether this is:
+     *
+     * 1. Mobile signup -> user exists in temp_users
+     * 2. Social signup -> user already exists in users
+     */
+
+    const tempUserResult = await client.query(
+      `
+      SELECT
+        id,
+        mobile_number,
+        is_verified,
+        email,
+        image_base64
+      FROM temp_users
+      WHERE id = $1
+      `,
       [userId]
     );
 
-    if (tempUserCheck.rows.length === 0) {
-      return res.status(404).json({ message: "Temp user not found" });
+    const existingUserResult = await client.query(
+      `
+      SELECT
+        id,
+        mobile_number,
+        name,
+        email
+      FROM users
+      WHERE id = $1
+      `,
+      [userId]
+    );
+
+    const tempUser = tempUserResult.rows[0] || null;
+    const existingUser = existingUserResult.rows[0] || null;
+
+    /*
+     * User must exist either in temp_users
+     * or users.
+     */
+    if (!tempUser && !existingUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
     }
 
-    const mobileNumber = tempUserCheck.rows[0].mobile_number;
-
-    // 🚨 SPECIAL CASE: TEST NUMBER BYPASS
-    if (mobileNumber === "1111111111") {
-      const existingUser = await client.query(
-        `SELECT id, mobile_number, name FROM users WHERE mobile_number = $1`,
-        [mobileNumber]
+    // TEST USER BYPASS
+    if (
+      tempUser &&
+      String(tempUser.mobile_number) === "1111111111"
+    ) {
+      const testUserResult = await client.query(
+        `
+        SELECT
+          id,
+          mobile_number,
+          name
+        FROM users
+        WHERE mobile_number = $1
+        LIMIT 1
+        `,
+        ["1111111111"]
       );
 
-      if (existingUser.rows.length === 0) {
+      if (testUserResult.rows.length === 0) {
         return res.status(404).json({
+          success: false,
           message: "Test user not found in users table",
         });
       }
 
-      const user = existingUser.rows[0];
+      const user = testUserResult.rows[0];
 
       const token = generateToken({
         userId: user.id,
@@ -82,28 +133,89 @@ exports.saveJourneyDetails = async (req, res) => {
       });
     }
 
-    // 🟢 NORMAL FLOW STARTS
     await client.query("BEGIN");
 
-    // 1️⃣ Move user from temp_users → users
-    await client.query(
-      `
-      INSERT INTO users (id, mobile_number, is_verified, name, email, image_base64)
-      SELECT id, mobile_number, is_verified, $2, email, image_base64
-      FROM temp_users
-      WHERE id = $1
-      `,
-      [userId, name]
-    );
+    /*
+     * MOBILE SIGNUP
+     *
+     * User currently exists in temp_users.
+     * Move them into users.
+     */
+    if (tempUser && !existingUser) {
+      await client.query(
+        `
+        INSERT INTO users (
+          id,
+          mobile_number,
+          is_verified,
+          name,
+          email,
+          image_base64
+        )
+        VALUES ($1, $2, $3, $4, $5, $6)
+        `,
+        [
+          tempUser.id,
+          tempUser.mobile_number,
+          tempUser.is_verified,
+          name,
+          tempUser.email,
+          tempUser.image_base64,
+        ]
+      );
 
-    // 2️⃣ Remove from temp_users
-    await client.query(
-      `DELETE FROM temp_users WHERE id = $1`,
+      await client.query(
+        `
+        DELETE FROM temp_users
+        WHERE id = $1
+        `,
+        [userId]
+      );
+    }
+
+    /*
+     * SOCIAL SIGNUP
+     *
+     * Google/Facebook already created the user
+     * in users table.
+     *
+     * Just update the name supplied during onboarding.
+     */
+    if (existingUser) {
+      await client.query(
+        `
+        UPDATE users
+        SET name = $2
+        WHERE id = $1
+        `,
+        [userId, name]
+      );
+    }
+
+    /*
+     * Prevent duplicate journey creation.
+     */
+    const journeyCheck = await client.query(
+      `
+      SELECT id
+      FROM journey_details
+      WHERE user_id = $1
+      LIMIT 1
+      `,
       [userId]
     );
 
-    // 3️⃣ Insert journey details
-    const result = await client.query(
+    if (journeyCheck.rows.length > 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(409).json({
+        success: false,
+        message: "Journey details already exist",
+      });
+    }
+
+    // INSERT JOURNEY DETAILS
+    const journeyResult = await client.query(
       `
       INSERT INTO journey_details (
         user_id,
@@ -117,7 +229,9 @@ exports.saveJourneyDetails = async (req, res) => {
         diagnosed_conditions,
         tracking_symptoms
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10
+      )
       RETURNING id
       `,
       [
@@ -134,7 +248,7 @@ exports.saveJourneyDetails = async (req, res) => {
       ]
     );
 
-    // 4️⃣ Insert first period log
+    // INSERT INITIAL PERIOD LOG
     await client.query(
       `
       INSERT INTO user_period_log (
@@ -145,44 +259,62 @@ exports.saveJourneyDetails = async (req, res) => {
       )
       VALUES ($1,$2,$3,$4)
       `,
-      [userId, lastPeriodDate, bleedingDays, cycleLengthDays]
+      [
+        userId,
+        lastPeriodDate,
+        bleedingDays,
+        cycleLengthDays,
+      ]
     );
 
-    // 5️⃣ Get user
-    const userResult = await client.query(
+    // GET FINAL USER
+    const finalUserResult = await client.query(
       `
-      SELECT id, mobile_number, name
+      SELECT
+        id,
+        mobile_number,
+        name,
+        email
       FROM users
       WHERE id = $1
       `,
       [userId]
     );
 
-    const user = userResult.rows[0];
+    const user = finalUserResult.rows[0];
 
     await client.query("COMMIT");
 
     const token = generateToken({
       userId: user.id,
-      mobileNumber: user.mobile_number,
+      mobileNumber: user.mobile_number || null,
     });
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
+      message: "Journey details saved successfully",
       token,
-      journeyId: result.rows[0].id,
+      journeyId: journeyResult.rows[0].id,
+
       user: {
         id: user.id,
         mobileNumber: user.mobile_number,
         name: user.name,
+        email: user.email,
       },
     });
 
   } catch (error) {
-    await client.query("ROLLBACK");
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      console.error("Journey rollback error:", rollbackError);
+    }
 
     console.error("Journey save error:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
+      success: false,
       message: "Failed to save journey details",
     });
 
