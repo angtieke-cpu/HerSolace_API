@@ -205,6 +205,7 @@ exports.verifyOtp = async (req, res) => {
 
 exports.googleLogin = async (req, res) => {
   const client = await db.connect();
+  let transactionStarted = false;
 
   try {
     const { idToken } = req.body;
@@ -212,14 +213,14 @@ exports.googleLogin = async (req, res) => {
     if (!idToken) {
       return res.status(400).json({
         success: false,
-        message: "Google ID token is required"
+        message: "Google ID token is required",
       });
     }
 
     // 1. Verify Google ID token
     const ticket = await googleClient.verifyIdToken({
       idToken,
-      audience: process.env.GOOGLE_CLIENT_ID
+      audience: process.env.GOOGLE_CLIENT_ID,
     });
 
     const payload = ticket.getPayload();
@@ -227,29 +228,31 @@ exports.googleLogin = async (req, res) => {
     if (!payload) {
       return res.status(401).json({
         success: false,
-        message: "Invalid Google token"
+        message: "Invalid Google token",
       });
     }
 
     const googleUserId = payload.sub;
     const email = payload.email || null;
     const name = payload.name || null;
-    const picture = payload.picture || null;
 
     if (!googleUserId) {
       return res.status(401).json({
         success: false,
-        message: "Google user ID not found"
+        message: "Google user ID not found",
       });
     }
 
     await client.query("BEGIN");
+    transactionStarted = true;
 
-    // 2. Check whether Google account is already linked
+    let user;
+    let isNewUser = false;
+
+    // 2. Check whether Google provider is already linked
     const providerResult = await client.query(
       `
       SELECT
-        uap.user_id,
         u.id,
         u.name,
         u.email,
@@ -264,14 +267,12 @@ exports.googleLogin = async (req, res) => {
       [googleUserId]
     );
 
-    let user;
-
     if (providerResult.rows.length > 0) {
-      // Existing Google user
+      // Existing Google account
       user = providerResult.rows[0];
     } else {
-
-      // 3. Check whether email already belongs to a user
+      // 3. Google provider is not linked.
+      // Try to find an existing HerSolace account by email.
       let existingUser = null;
 
       if (email) {
@@ -295,10 +296,10 @@ exports.googleLogin = async (req, res) => {
       }
 
       if (existingUser) {
-        // Existing OTP account
+        // Existing HerSolace user
         user = existingUser;
       } else {
-        // 4. Create new user
+        // 4. Completely new Google user
         const userResult = await client.query(
           `
           INSERT INTO users (
@@ -316,9 +317,10 @@ exports.googleLogin = async (req, res) => {
         );
 
         user = userResult.rows[0];
+        isNewUser = true;
       }
 
-      // 5. Link Google account
+      // 5. Link Google provider to user
       await client.query(
         `
         INSERT INTO user_auth_providers (
@@ -333,40 +335,71 @@ exports.googleLogin = async (req, res) => {
           email = EXCLUDED.email,
           updated_at = CURRENT_TIMESTAMP
         `,
-        [
-          user.id,
-          googleUserId,
-          email
-        ]
+        [user.id, googleUserId, email]
       );
     }
 
-    await client.query("COMMIT");
+    // 6. Check whether Journey onboarding is completed
+    const journeyResult = await client.query(
+      `
+      SELECT id
+      FROM journey_details
+      WHERE user_id = $1
+      LIMIT 1
+      `,
+      [user.id]
+    );
 
-    // 6. Generate your existing HerSolace JWT
+    const requiresOnboarding = journeyResult.rows.length === 0;
+
+    await client.query("COMMIT");
+    transactionStarted = false;
+
+    // 7. Generate HerSolace JWT
     const token = generateToken({
-      userId: user.id
+      userId: user.id,
+      mobileNumber: user.mobile_number || null,
     });
 
-    return res.json({
+    return res.status(200).json({
       success: true,
-      message: "Google login successful",
+      message: isNewUser
+        ? "Google signup successful"
+        : "Google login successful",
+
       userId: user.id,
       token,
-      isNewUser: !providerResult.rows.length,
-      user
-    });
 
+      // true only when a new users row was created
+      isNewUser,
+
+      // frontend should use this for navigation
+      requiresOnboarding,
+
+      provider: "google",
+
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        mobileNumber: user.mobile_number,
+      },
+    });
   } catch (error) {
-    await client.query("ROLLBACK");
+    if (transactionStarted) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        console.error("Google rollback error:", rollbackError);
+      }
+    }
 
     console.error("Google login error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Google login failed"
+      message: "Google authentication failed",
     });
-
   } finally {
     client.release();
   }
@@ -374,6 +407,7 @@ exports.googleLogin = async (req, res) => {
 
 exports.facebookLogin = async (req, res) => {
   const client = await db.connect();
+  let transactionStarted = false;
 
   try {
     const { accessToken } = req.body;
@@ -381,11 +415,11 @@ exports.facebookLogin = async (req, res) => {
     if (!accessToken) {
       return res.status(400).json({
         success: false,
-        message: "Facebook access token is required"
+        message: "Facebook access token is required",
       });
     }
 
-    // 1. Verify Facebook token and get user information
+    // 1. Verify Facebook access token
     const debugUrl =
       `https://graph.facebook.com/debug_token` +
       `?input_token=${encodeURIComponent(accessToken)}` +
@@ -398,7 +432,7 @@ exports.facebookLogin = async (req, res) => {
     if (!debugResponse.ok) {
       return res.status(401).json({
         success: false,
-        message: "Unable to verify Facebook token"
+        message: "Unable to verify Facebook token",
       });
     }
 
@@ -406,11 +440,11 @@ exports.facebookLogin = async (req, res) => {
 
     if (
       !debugData?.data?.is_valid ||
-      debugData?.data?.app_id !== process.env.FACEBOOK_APP_ID
+      String(debugData?.data?.app_id) !== String(process.env.FACEBOOK_APP_ID)
     ) {
       return res.status(401).json({
         success: false,
-        message: "Invalid Facebook access token"
+        message: "Invalid Facebook access token",
       });
     }
 
@@ -419,7 +453,7 @@ exports.facebookLogin = async (req, res) => {
     if (!facebookUserId) {
       return res.status(401).json({
         success: false,
-        message: "Facebook user ID not found"
+        message: "Facebook user ID not found",
       });
     }
 
@@ -434,7 +468,7 @@ exports.facebookLogin = async (req, res) => {
     if (!profileResponse.ok) {
       return res.status(401).json({
         success: false,
-        message: "Unable to fetch Facebook profile"
+        message: "Unable to fetch Facebook profile",
       });
     }
 
@@ -444,12 +478,15 @@ exports.facebookLogin = async (req, res) => {
     const email = profile.email || null;
 
     await client.query("BEGIN");
+    transactionStarted = true;
 
-    // 3. Check existing Facebook account
+    let user;
+    let isNewUser = false;
+
+    // 3. Check whether Facebook provider is already linked
     const providerResult = await client.query(
       `
       SELECT
-        uap.user_id,
         u.id,
         u.name,
         u.email,
@@ -464,16 +501,12 @@ exports.facebookLogin = async (req, res) => {
       [facebookUserId]
     );
 
-    let user;
-
     if (providerResult.rows.length > 0) {
-
-      // Existing Facebook user
+      // Existing Facebook account
       user = providerResult.rows[0];
-
     } else {
-
-      // 4. Check existing account using email
+      // 4. Facebook provider isn't linked.
+      // Try to find an existing HerSolace account by email.
       let existingUser = null;
 
       if (email) {
@@ -497,13 +530,10 @@ exports.facebookLogin = async (req, res) => {
       }
 
       if (existingUser) {
-
-        // Existing OTP/Google account
+        // Existing HerSolace/OTP/Google user
         user = existingUser;
-
       } else {
-
-        // 5. Create new user
+        // 5. Completely new Facebook user
         const userResult = await client.query(
           `
           INSERT INTO users (
@@ -521,9 +551,10 @@ exports.facebookLogin = async (req, res) => {
         );
 
         user = userResult.rows[0];
+        isNewUser = true;
       }
 
-      // 6. Link Facebook account
+      // 6. Link Facebook provider
       await client.query(
         `
         INSERT INTO user_auth_providers (
@@ -538,40 +569,71 @@ exports.facebookLogin = async (req, res) => {
           email = EXCLUDED.email,
           updated_at = CURRENT_TIMESTAMP
         `,
-        [
-          user.id,
-          facebookUserId,
-          email
-        ]
+        [user.id, facebookUserId, email]
       );
     }
 
-    await client.query("COMMIT");
+    // 7. Check whether Journey onboarding is completed
+    const journeyResult = await client.query(
+      `
+      SELECT id
+      FROM journey_details
+      WHERE user_id = $1
+      LIMIT 1
+      `,
+      [user.id]
+    );
 
-    // 7. Generate HerSolace JWT
+    const requiresOnboarding = journeyResult.rows.length === 0;
+
+    await client.query("COMMIT");
+    transactionStarted = false;
+
+    // 8. Generate HerSolace JWT
     const token = generateToken({
-      userId: user.id
+      userId: user.id,
+      mobileNumber: user.mobile_number || null,
     });
 
-    return res.json({
+    return res.status(200).json({
       success: true,
-      message: "Facebook login successful",
+      message: isNewUser
+        ? "Facebook signup successful"
+        : "Facebook login successful",
+
       userId: user.id,
       token,
-      isNewUser: !providerResult.rows.length,
-      user
-    });
 
+      // true only when a new users row was created
+      isNewUser,
+
+      // frontend should use this for navigation
+      requiresOnboarding,
+
+      provider: "facebook",
+
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        mobileNumber: user.mobile_number,
+      },
+    });
   } catch (error) {
-    await client.query("ROLLBACK");
+    if (transactionStarted) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        console.error("Facebook rollback error:", rollbackError);
+      }
+    }
 
     console.error("Facebook login error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Facebook login failed"
+      message: "Facebook authentication failed",
     });
-
   } finally {
     client.release();
   }
