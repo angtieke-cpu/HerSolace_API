@@ -408,7 +408,12 @@ exports.getCycleHormoneData = async (req, res) => {
 exports.createDailyLog = async (req, res) => {
   try {
     const userId = req.user?.userId;
-    const { logDate, logData } = req.body;
+
+    const {
+      logDate,
+      logData,
+      dailyCheckIn = {}
+    } = req.body;
 
     if (!userId) {
       return res.status(400).json({
@@ -431,6 +436,7 @@ exports.createDailyLog = async (req, res) => {
       });
     }
 
+    // Validate logData
     if (!Array.isArray(logData)) {
       return res.status(400).json({
         success: false,
@@ -438,34 +444,54 @@ exports.createDailyLog = async (req, res) => {
       });
     }
 
-   const invalidSymptom = logData.some(
-  (item) =>
-    !item ||
-    typeof item !== "object" ||
-    Array.isArray(item) ||
-    !item.symptomId ||
-    typeof item.symptomId !== "string"
-);
+    // Validate symptoms
+    const invalidSymptom = logData.some(
+      (item) =>
+        !item ||
+        typeof item !== "object" ||
+        Array.isArray(item) ||
+        !item.symptomId ||
+        typeof item.symptomId !== "string"
+    );
 
-if (invalidSymptom) {
-  return res.status(400).json({
-    success: false,
-    message: "Each logData item must contain a valid symptomId"
-  });
-}
+    if (invalidSymptom) {
+      return res.status(400).json({
+        success: false,
+        message: "Each logData item must contain a valid symptomId"
+      });
+    }
+
+    // Validate dailyCheckIn
+    if (
+      dailyCheckIn === null ||
+      typeof dailyCheckIn !== "object" ||
+      Array.isArray(dailyCheckIn)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "dailyCheckIn must be an object"
+      });
+    }
 
     const result = await db.query(
       `
       INSERT INTO daily_health_logs (
         user_id,
         log_date,
-        log_data
+        log_data,
+        daily_check_in
       )
-      VALUES ($1, $2::date, $3::jsonb)
+      VALUES (
+        $1,
+        $2::date,
+        $3::jsonb,
+        $4::jsonb
+      )
 
       ON CONFLICT (user_id, log_date)
       DO UPDATE SET
         log_data = EXCLUDED.log_data,
+        daily_check_in = EXCLUDED.daily_check_in,
         updated_at = NOW()
 
       RETURNING
@@ -473,13 +499,15 @@ if (invalidSymptom) {
         user_id AS "userId",
         log_date AS "logDate",
         log_data AS "logData",
+        daily_check_in AS "dailyCheckIn",
         created_at AS "createdAt",
         updated_at AS "updatedAt";
       `,
       [
         userId,
         logDate,
-        JSON.stringify(logData)
+        JSON.stringify(logData),
+        JSON.stringify(dailyCheckIn)
       ]
     );
 
@@ -488,6 +516,7 @@ if (invalidSymptom) {
       message: "Daily log saved successfully",
       data: result.rows[0]
     });
+
   } catch (error) {
     console.error("Daily log error:", error);
 
