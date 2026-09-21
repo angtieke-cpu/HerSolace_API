@@ -560,6 +560,7 @@ exports.getTodayLog = async (req, res) => {
         user_id AS "userId",
         log_date AS "logDate",
         log_data AS "logData",
+        daily_check_in AS "dailyCheckIn",
         created_at AS "createdAt",
         updated_at AS "updatedAt"
       FROM daily_health_logs
@@ -583,6 +584,7 @@ exports.getTodayLog = async (req, res) => {
       hasLog: true,
       data: result.rows[0]
     });
+
   } catch (error) {
     console.error("Get log error:", error);
 
@@ -592,7 +594,6 @@ exports.getTodayLog = async (req, res) => {
     });
   }
 };
-
 exports.logLatestPeriod = async (req, res) => {
     try {
         const userId = req.user.userId;
