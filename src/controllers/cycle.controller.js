@@ -1,5 +1,10 @@
 const db = require("../db");
-const { calculateCycle, resolveEffectiveCycleStart } = require("../utils/cycleCalculator");
+const {
+    calculateCycle,
+    resolveEffectiveCycleStart,
+    averageCycleLength,
+    APP_TIMEZONE,
+} = require("../utils/cycleCalculator");
 const dayjs = require("dayjs");
 const utc = require("dayjs/plugin/utc");
 const timezone = require("dayjs/plugin/timezone");
@@ -607,67 +612,58 @@ exports.logLatestPeriod = async (req, res) => {
             return res.status(400).json({ message: "periodDate required" });
         }
 
-        const newDate = dayjs(periodDate);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(periodDate) || !dayjs(periodDate).isValid()) {
+            return res.status(400).json({ message: "periodDate must be in YYYY-MM-DD format" });
+        }
+
+        const todayKey = dayjs().tz(APP_TIMEZONE).format("YYYY-MM-DD");
+        if (periodDate > todayKey) {
+            return res.status(400).json({ message: "periodDate cannot be in the future" });
+        }
 
         // ✅ 1. Get past records
         const prevResult = await db.query(
             `
-      SELECT period_date, bleeding_days
+      SELECT id, period_date, bleeding_days, cycle_length
       FROM user_period_log
       WHERE user_id = $1
       ORDER BY period_date DESC
-      LIMIT 6
       `,
             [userId]
         );
 
         const rows = prevResult.rows;
+        const existingDates = rows.map((r) => dayjs(r.period_date).format("YYYY-MM-DD"));
 
-        let cycle_length = null;
-        let bleeding_days = null;
-
-        // ✅ 2. Calculate cycle length (NO DEFAULT)
-        if (rows.length >= 1) {
-            let diffs = [];
-
-            // include new entry vs latest record
-            const latestDate = dayjs(rows[0].period_date);
-            const newDiff = newDate.diff(latestDate, "day");
-
-            if (newDiff > 0) {
-                diffs.push(newDiff);
-            }
-
-            // previous diffs
-            for (let i = 0; i < rows.length - 1; i++) {
-                const d1 = dayjs(rows[i].period_date);
-                const d2 = dayjs(rows[i + 1].period_date);
-
-                const diff = d1.diff(d2, "day");
-
-                if (diff > 0) {
-                    diffs.push(diff);
-                }
-            }
-
-            if (diffs.length > 0) {
-                const avg =
-                    diffs.reduce((a, b) => a + b, 0) / diffs.length;
-
-                cycle_length = Math.round(avg);
-            }
+        // Logging the same start date twice would create a zero-day "cycle" and a duplicate row.
+        if (existingDates.includes(periodDate)) {
+            return res.status(409).json({ message: "This period date is already logged" });
         }
 
-        // ✅ 3. Calculate bleeding_days (NO DEFAULT)
+        // ✅ 2. Cycle length — same averaging the Calendar endpoint uses, so Home/AI (which read
+        // this stored value) and Calendar (which derives it from history) always agree.
+        const cycle_length = averageCycleLength(
+            [...existingDates, periodDate],
+            rows[0]?.cycle_length || 28
+        );
+
+        // ✅ 3. Bleeding days — average of the recent logged values, defaulting like Calendar does
         const bleedValues = rows
-            .map(r => r.bleeding_days)
-            .filter(v => v !== null && v > 0);
+            .slice(0, 6)
+            .map(r => Number(r.bleeding_days))
+            .filter(v => v > 0);
 
-        if (bleedValues.length > 0) {
-            const avgBleed =
-                bleedValues.reduce((a, b) => a + b, 0) / bleedValues.length;
+        const bleeding_days = bleedValues.length > 0
+            ? Math.round(bleedValues.reduce((a, b) => a + b, 0) / bleedValues.length)
+            : 5;
 
-            bleeding_days = Math.round(avgBleed);
+        // A backfilled older date changes the average too — keep the latest row (the one Home/AI
+        // read) in sync with it.
+        if (rows.length > 0 && periodDate < existingDates[0]) {
+            await db.query(
+                `UPDATE user_period_log SET cycle_length = $1 WHERE id = $2`,
+                [cycle_length, rows[0].id]
+            );
         }
 
         // ✅ 4. Insert new record
@@ -831,7 +827,7 @@ exports.updateLatestCycleDetails = async (req, res) => {
 
         const latestResult = await db.query(
             `
-      SELECT id
+      SELECT id, cycle_length
       FROM user_period_log
       WHERE user_id=$1
       ORDER BY period_date DESC
@@ -870,11 +866,59 @@ exports.updateLatestCycleDetails = async (req, res) => {
 
         if (periodDate) {
 
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(periodDate) || !dayjs(periodDate).isValid()) {
+                return res.status(400).json({
+                    message: "periodDate must be in YYYY-MM-DD format"
+                });
+            }
+
+            if (periodDate > dayjs().tz(APP_TIMEZONE).format("YYYY-MM-DD")) {
+                return res.status(400).json({
+                    message: "periodDate cannot be in the future"
+                });
+            }
+
+            const otherResult = await db.query(
+                `
+          SELECT period_date
+          FROM user_period_log
+          WHERE user_id=$1 AND id<>$2
+          `,
+                [userId, latestId]
+            );
+
+            const otherDates = otherResult.rows.map(
+                (r) => dayjs(r.period_date).format("YYYY-MM-DD")
+            );
+
+            // Must stay the latest entry and not collide with another logged period.
+            if (otherDates.some((date) => date >= periodDate)) {
+                return res.status(400).json({
+                    message: "periodDate must be after your previously logged periods"
+                });
+            }
+
             updates.push(
                 `period_date=$${index++}`
             );
 
             values.push(periodDate);
+
+            // Moving the start date changes the gap to the previous period — recompute the
+            // stored average (what Home/AI read) the same way Calendar derives it from history,
+            // unless the caller is setting cycleLength explicitly.
+            if (!cycleLength && otherDates.length > 0) {
+                updates.push(
+                    `cycle_length=$${index++}`
+                );
+
+                values.push(
+                    averageCycleLength(
+                        [...otherDates, periodDate],
+                        latestResult.rows[0].cycle_length || 28
+                    )
+                );
+            }
 
         }
 
@@ -1206,30 +1250,14 @@ exports.getCycleCalendarDetails = async (req, res) => {
 
     // ---------------------------------------------------------
     // 3. Average cycle length
-    // Same calculation as frontend
+    // Same helper logLatestPeriod uses to store cycle_length on
+    // the latest row (what Home / AI read), so all screens agree.
     // ---------------------------------------------------------
 
-    let cycleLength = 28;
-
-    if (history.length === 1) {
-      cycleLength =
-        Number(history[0].cycleLength) || 28;
-    } else {
-      let totalDifference = 0;
-
-      for (let index = 1; index < history.length; index++) {
-        totalDifference += dayjs(
-          history[index].periodDate
-        ).diff(
-          dayjs(history[index - 1].periodDate),
-          "day"
-        );
-      }
-
-      cycleLength = Math.round(
-        totalDifference / (history.length - 1)
-      );
-    }
+    let cycleLength = averageCycleLength(
+      history.map((record) => record.periodDate),
+      history[history.length - 1].cycleLength || 28
+    );
 
     /*
      * Prevent invalid database values from breaking prediction.
@@ -1268,10 +1296,13 @@ exports.getCycleCalendarDetails = async (req, res) => {
 
     // ---------------------------------------------------------
     // 5. Current cycle prediction
+    // Ovulation is cycle day (cycleLength - 14), 1-indexed - the
+    // same day calculateCycle() (Home dial / AI / notifications)
+    // and getCycleHormoneData use - i.e. start + cycleLength - 15.
     // ---------------------------------------------------------
 
     const ovulation = effectiveCycleStart.add(
-      cycleLength - 14,
+      cycleLength - 15,
       "day"
     );
 
@@ -1380,7 +1411,7 @@ exports.getCycleCalendarDetails = async (req, res) => {
 
     const confirmedPeriods = [];
 
-    for (const record of history) {
+    for (const [historyIndex, record] of history.entries()) {
       const periodStart = dayjs(
         record.periodDate
       ).startOf("day");
@@ -1388,13 +1419,20 @@ exports.getCycleCalendarDetails = async (req, res) => {
       const recordBleedingDays =
         Number(record.bleedingDays) || 5;
 
-      const recordCycleLength =
-        Number(record.cycleLength) ||
-        cycleLength;
+      /*
+       * When the next period was logged, this cycle's real length
+       * is known - ovulation was ~14 days before that period,
+       * not before the originally predicted one.
+       */
+      const nextLoggedRecord = history[historyIndex + 1];
+
+      const recordCycleLength = nextLoggedRecord
+        ? dayjs(nextLoggedRecord.periodDate).diff(periodStart, "day")
+        : Number(record.cycleLength) || cycleLength;
 
       const recordOvulation =
         periodStart.add(
-          recordCycleLength - 14,
+          recordCycleLength - 15,
           "day"
         );
 
@@ -1512,8 +1550,9 @@ exports.getCycleCalendarDetails = async (req, res) => {
         overrideNextPeriod ||
         cycleStart.add(cycleStartLength, "day");
 
+      // Cycle day (length - 14), matching calculateCycle().
       const cycleOvulation =
-        cycleNextPeriod.subtract(14, "day");
+        cycleNextPeriod.subtract(15, "day");
 
       const cycleFertileStart =
         cycleOvulation.subtract(2, "day");
@@ -1582,7 +1621,7 @@ exports.getCycleCalendarDetails = async (req, res) => {
      * within the previous-6-months window. Nothing is fabricated
      * to fill the range beyond what was actually logged.
      */
-    for (const record of history) {
+    for (const [historyIndex, record] of history.entries()) {
       const periodStart = dayjs(
         record.periodDate
       ).startOf("day");
@@ -1591,6 +1630,33 @@ exports.getCycleCalendarDetails = async (req, res) => {
         !periodStart.isBefore(effectiveCycleStart, "day") ||
         periodStart.isBefore(rangeStart, "day")
       ) {
+        continue;
+      }
+
+      /*
+       * A past cycle that was followed by another logged period
+       * actually ended the day that period started - e.g. a
+       * period logged 5 days earlier than predicted. Its window
+       * must end there too, or it keeps overlapping the new cycle
+       * (the Log screen then reads today as "Luteal" from the old
+       * cycle, and its PMS days paint over the new period).
+       */
+      const nextLoggedRecord = history[historyIndex + 1];
+
+      if (nextLoggedRecord) {
+        const nextLoggedStart = dayjs(
+          nextLoggedRecord.periodDate
+        ).startOf("day");
+
+        predictedCycles.push(
+          buildCycleEntry(
+            periodStart,
+            nextLoggedStart.diff(periodStart, "day"),
+            Number(record.bleedingDays) || 5,
+            "past",
+            nextLoggedStart
+          )
+        );
         continue;
       }
 
@@ -1617,16 +1683,23 @@ exports.getCycleCalendarDetails = async (req, res) => {
     }
 
     /*
-     * Current cycle: only when NOT overdue - effectiveCycleStart
-     * is the actual/assumed start of the cycle in progress, so
-     * its period days genuinely happened (or are assumed to).
-     * When overdue, effectiveCycleStart's expected period never
-     * got a DB entry confirming it started, so no period-days
-     * block is fabricated for it - the chain below picks up the
-     * "current" label instead, starting from `nextPeriod`.
+     * Current cycle: effectiveCycleStart is the actual/assumed
+     * start of the cycle in progress. Pushed when not overdue, or
+     * when overdue but that start IS the last logged period (a
+     * period that's just running late) - that cycle is still in
+     * progress and must cover today, otherwise the Log screen has
+     * no phase for today while Home shows "Luteal". Its end is
+     * the overdue-aware `nextPeriod`.
+     * When a whole cycle was missed, effectiveCycleStart's
+     * period never got a DB entry confirming it started, so no
+     * period-days block is fabricated for it - the logged cycle
+     * above already stretches to `nextPeriod`, and the chain below
+     * picks up the "current" label instead.
      */
+    const pushCurrentCycle = !isOverdue || !missedCycleDetected;
+
     if (
-      !isOverdue &&
+      pushCurrentCycle &&
       !effectiveCycleStart.isAfter(rangeEnd, "day")
     ) {
       predictedCycles.push(
@@ -1658,7 +1731,7 @@ exports.getCycleCalendarDetails = async (req, res) => {
           cycleStart,
           cycleLength,
           bleedingDays,
-          isOverdue && isFirstInFutureChain
+          !pushCurrentCycle && isFirstInFutureChain
             ? "current"
             : "future"
         )
