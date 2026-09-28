@@ -32,6 +32,38 @@ function resolveEffectiveCycleStart(startDate, cycleLength, today) {
   };
 }
 
+// Cycle gaps outside this range are almost certainly logging mistakes (a duplicate entry, a
+// skipped month) rather than a real cycle, so they're left out of the average.
+const MIN_CYCLE_LENGTH = 15;
+const MAX_CYCLE_LENGTH = 60;
+// Only the most recent cycles are averaged, so predictions follow the user's current rhythm.
+const CYCLES_TO_AVERAGE = 6;
+
+/**
+ * Average cycle length from the gaps between logged period start dates. Shared by
+ * logLatestPeriod / updateLatestCycleDetails (which store it on the latest row — the value
+ * Home/AI read) and the Calendar endpoint (which derives it from history), so both always
+ * land on the same number. Falls back to `fallback` (e.g. the user-entered length) when there
+ * aren't any valid gaps yet.
+ */
+function averageCycleLength(periodDates, fallback = 28) {
+  const sorted = periodDates
+    .map((date) => dayjs(date).startOf("day"))
+    .filter((date) => date.isValid())
+    .sort((a, b) => a.valueOf() - b.valueOf());
+
+  const gaps = [];
+  for (let index = 1; index < sorted.length; index++) {
+    const gap = sorted[index].diff(sorted[index - 1], "day");
+    if (gap >= MIN_CYCLE_LENGTH && gap <= MAX_CYCLE_LENGTH) gaps.push(gap);
+  }
+
+  const recentGaps = gaps.slice(-CYCLES_TO_AVERAGE);
+  if (recentGaps.length === 0) return Number(fallback) || 28;
+
+  return Math.round(recentGaps.reduce((sum, gap) => sum + gap, 0) / recentGaps.length);
+}
+
 /**
  * Single source of truth for "today's" cycle day, phase and predicted dates — shared by every
  * endpoint that needs them (getCyclePrediction for Home, getCycleCalendarDetails for Calendar,
@@ -39,9 +71,14 @@ function resolveEffectiveCycleStart(startDate, cycleLength, today) {
  * drift apart.
  */
 function calculateCycle({ lastPeriodDate, cycleLength, bleedingDays }) {
-  if (!lastPeriodDate || !cycleLength || !bleedingDays) {
-    throw new Error("lastPeriodDate, cycleLength and bleedingDays are required");
+  if (!lastPeriodDate) {
+    throw new Error("lastPeriodDate is required");
   }
+
+  // A freshly logged row can have NULL cycle_length / bleeding_days (nothing to average from
+  // yet) — fall back to the same defaults the Calendar endpoint uses instead of failing Home/AI.
+  cycleLength = Number(cycleLength) || 28;
+  bleedingDays = Number(bleedingDays) || 5;
 
   const today = dayjs().tz(APP_TIMEZONE).startOf("day");
   // `lastPeriodDate` is a plain calendar date (a 'YYYY-MM-DD' string, or a value that formats
@@ -169,8 +206,10 @@ function calculateCycle({ lastPeriodDate, cycleLength, bleedingDays }) {
   const nextPeriod = isOverdue ? today.add(1, "day") : rawNextPeriod;
 
   const ovulationDate = effectiveStart.add(ovulationDay - 1, "day");
-  const fertileWindowStart = effectiveStart.add(ovulationDay - 5 - 1, "day");
-  const fertileWindowEnd = effectiveStart.add(ovulationDay + 1 - 1, "day");
+  // Ovulation ±2 days — the same window the Calendar paints as "Fertile" and Home's Fertile
+  // Window pill shows, so a fertile-window reminder never points at a different day.
+  const fertileWindowStart = effectiveStart.add(ovulationDay - 2 - 1, "day");
+  const fertileWindowEnd = effectiveStart.add(ovulationDay + 2 - 1, "day");
 
   const dayLabel = `Day ${currentDay} - ${phase} (${stage})`;
 
@@ -201,4 +240,9 @@ function calculateCycle({ lastPeriodDate, cycleLength, bleedingDays }) {
   };
 }
 
-module.exports = { calculateCycle, resolveEffectiveCycleStart, APP_TIMEZONE };
+module.exports = {
+  calculateCycle,
+  resolveEffectiveCycleStart,
+  averageCycleLength,
+  APP_TIMEZONE,
+};
