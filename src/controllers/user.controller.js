@@ -1,5 +1,7 @@
 
 const db = require("../db");
+const dayjs = require("dayjs");
+const { calculateCycle } = require("../utils/cycleCalculator");
 
 exports.getUserProfile = async (req, res) => {
   try {
@@ -673,12 +675,6 @@ exports.getHomeNotifications = async (req, res) => {
       });
     }
 
-    // Get current date normalized to start of day (Asia/Kolkata context)
-    const now = new Date();
-    const today = new Date(
-      now.toLocaleDateString("en-US", { timeZone: "Asia/Kolkata" })
-    );
-
     const periodResult = await db.query(
       `
       SELECT period_date, cycle_length, bleeding_days
@@ -694,85 +690,103 @@ exports.getHomeNotifications = async (req, res) => {
 
     if (periodResult.rows.length > 0) {
       const log = periodResult.rows[0];
-      const cycleLength = Number(log.cycle_length) || 28;
 
-      const lastPeriodDate = new Date(
-        new Date(log.period_date).toLocaleDateString("en-US", {
-          timeZone: "Asia/Kolkata"
-        })
-      );
+      // Same shared calculator Home / Calendar / AI use, so a reminder can never promise a
+      // different date than those screens show (and it picks up a newly logged period at once).
+      const cycle = calculateCycle({
+        lastPeriodDate: log.period_date,
+        cycleLength: log.cycle_length,
+        bleedingDays: log.bleeding_days
+      });
 
-      const nextPeriodDate = new Date(lastPeriodDate);
-      nextPeriodDate.setDate(lastPeriodDate.getDate() + cycleLength);
+      const today = dayjs(cycle.today);
+      const daysUntil = (dateStr) => dayjs(dateStr).diff(today, "day");
+      const whenText = (days) =>
+        days === 0 ? "today" : days === 1 ? "tomorrow" : `in ${days} days`;
 
-      const ovulationDate = new Date(lastPeriodDate);
-      ovulationDate.setDate(lastPeriodDate.getDate() + cycleLength - 14);
-
-      const fertileStartDate = new Date(ovulationDate);
-      fertileStartDate.setDate(ovulationDate.getDate() - 5);
-
-      const fertileEndDate = new Date(ovulationDate);
-      fertileEndDate.setDate(ovulationDate.getDate() + 1);
-
-      // Day differences calculated relative to normalized today
-      const MS_PER_DAY = 1000 * 60 * 60 * 24;
-      const daysToPeriod = Math.ceil((nextPeriodDate - today) / MS_PER_DAY);
-      const daysToOvulation = Math.ceil((ovulationDate - today) / MS_PER_DAY);
-      const daysToFertile = Math.ceil((fertileStartDate - today) / MS_PER_DAY);
-
-      if (daysToPeriod >= 0 && daysToPeriod <= 7) {
-        const dateStr = nextPeriodDate.toISOString().split("T")[0];
+      if (cycle.isOverdue) {
+        // Keyed to the cycle (not the moving "tomorrow" estimate) so it's one reminder whose
+        // text is refreshed each day, instead of a new one every day.
+        const cycleStartStr = today
+          .subtract(cycle.currentDay - 1, "day")
+          .format("YYYY-MM-DD");
         derivedNotifications.push({
           notification_type: "period_reminder",
-          notification_key: `period_${dateStr}`,
+          notification_key: `period_late_${cycleStartStr}`,
           title: "Period reminder",
-          message: `Your period is expected within ${
-            daysToPeriod === 0 ? "today" : daysToPeriod + " days"
-          }. Keep essentials ready and log any symptoms early.`,
-          notification_date: dateStr,
+          message: `Your period is ${cycle.delayDays} day${
+            cycle.delayDays === 1 ? "" : "s"
+          } late. If it has started, log it so your predictions stay accurate.`,
+          notification_date: cycle.today,
           payload: {
-            expected_window: daysToPeriod === 0 ? "today" : `${daysToPeriod} days`,
-            date: dateStr
+            delay_days: cycle.delayDays,
+            cycle_start_date: cycleStartStr
           }
         });
+      } else {
+        const daysToPeriod = daysUntil(cycle.nextPeriod);
+        if (daysToPeriod >= 0 && daysToPeriod <= 7) {
+          derivedNotifications.push({
+            notification_type: "period_reminder",
+            notification_key: `period_${cycle.nextPeriod}`,
+            title: "Period reminder",
+            message: `Your period is expected ${whenText(
+              daysToPeriod
+            )}. Keep essentials ready and log any symptoms early.`,
+            notification_date: cycle.nextPeriod,
+            payload: {
+              expected_window: whenText(daysToPeriod),
+              date: cycle.nextPeriod
+            }
+          });
+        }
       }
 
+      const daysToOvulation = daysUntil(cycle.ovulation.date);
       if (daysToOvulation >= 0 && daysToOvulation <= 7) {
-        const dateStr = ovulationDate.toISOString().split("T")[0];
         derivedNotifications.push({
           notification_type: "ovulation_reminder",
-          notification_key: `ovulation_${dateStr}`,
+          notification_key: `ovulation_${cycle.ovulation.date}`,
           title: "Ovulation reminder",
-          message: `Your ovulation is expected within ${
-            daysToOvulation === 0 ? "today" : daysToOvulation + " days"
-          }.`,
-          notification_date: dateStr,
+          message: `Your ovulation is expected ${whenText(daysToOvulation)}.`,
+          notification_date: cycle.ovulation.date,
           payload: {
-            expected_window: daysToOvulation === 0 ? "today" : `${daysToOvulation} days`,
-            date: dateStr
+            expected_window: whenText(daysToOvulation),
+            date: cycle.ovulation.date
           }
         });
       }
 
+      const daysToFertile = daysUntil(cycle.fertileWindow.start);
       if (daysToFertile >= 0 && daysToFertile <= 7) {
-        const startDateStr = fertileStartDate.toISOString().split("T")[0];
-        const endDateStr = fertileEndDate.toISOString().split("T")[0];
         derivedNotifications.push({
           notification_type: "fertile_window_reminder",
-          notification_key: `fertile_${startDateStr}`,
+          notification_key: `fertile_${cycle.fertileWindow.start}`,
           title: "Fertile window reminder",
-          message: `Your fertile window is expected within ${
-            daysToFertile === 0 ? "today" : daysToFertile + " days"
-          }.`,
-          notification_date: startDateStr,
+          message: `Your fertile window is expected to start ${whenText(daysToFertile)}.`,
+          notification_date: cycle.fertileWindow.start,
           payload: {
-            expected_window: daysToFertile === 0 ? "today" : `${daysToFertile} days`,
-            start_date: startDateStr,
-            end_date: endDateStr
+            expected_window: whenText(daysToFertile),
+            start_date: cycle.fertileWindow.start,
+            end_date: cycle.fertileWindow.end
           }
         });
       }
     }
+
+    // Cycle reminders are predictions — once the prediction changes (a new period logged, the
+    // date edited, the date passed) an unread reminder for the old date is simply wrong, e.g.
+    // "period expected in 5 days" right after logging that it started today. Drop those.
+    await db.query(
+      `
+      DELETE FROM user_notification_tracker
+      WHERE user_id = $1
+        AND is_viewed = false
+        AND notification_type IN ('period_reminder', 'ovulation_reminder', 'fertile_window_reminder')
+        AND NOT (notification_key = ANY($2::text[]))
+      `,
+      [userId, derivedNotifications.map((item) => item.notification_key)]
+    );
 
     // ============================
     // Link Profile Requests
@@ -813,7 +827,12 @@ exports.getHomeNotifications = async (req, res) => {
         (user_id, notification_type, notification_key, title, message, payload, notification_date)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT (user_id, notification_key)
-        DO NOTHING
+        DO UPDATE SET
+          title = EXCLUDED.title,
+          message = EXCLUDED.message,
+          payload = EXCLUDED.payload,
+          notification_date = EXCLUDED.notification_date
+        WHERE user_notification_tracker.is_viewed = false
         `,
         [
           userId,
