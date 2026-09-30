@@ -1233,20 +1233,33 @@ exports.getCycleCalendarDetails = async (req, res) => {
     // 2. Format history
     // ---------------------------------------------------------
 
-    const history = periodResult.rows.map((row) => ({
-      id: row.id,
+    const history = periodResult.rows.map((row, index, rows) => {
+      const periodDate = dayjs(row.period_date).startOf("day");
+      const nextRow = rows[index + 1];
 
-      periodDate: dayjs(row.period_date)
-        .format("YYYY-MM-DD"),
+      return {
+        id: row.id,
 
-      bleedingDays:
-        Number(row.bleeding_days) || 5,
+        periodDate: periodDate.format("YYYY-MM-DD"),
 
-      cycleLength:
-        row.cycle_length !== null
-          ? Number(row.cycle_length)
+        bleedingDays:
+          Number(row.bleeding_days) || 5,
+
+        // Stored value - the running average at the time this period was logged.
+        cycleLength:
+          row.cycle_length !== null
+            ? Number(row.cycle_length)
+            : null,
+
+        /*
+         * Real length of this cycle: days from this period to the next logged one.
+         * null for the latest period, whose cycle is still in progress.
+         */
+        actualCycleLength: nextRow
+          ? dayjs(nextRow.period_date).startOf("day").diff(periodDate, "day")
           : null
-    }));
+      };
+    });
 
     // ---------------------------------------------------------
     // 3. Average cycle length
@@ -1361,47 +1374,35 @@ exports.getCycleCalendarDetails = async (req, res) => {
 
     // ---------------------------------------------------------
     // 6. Regularity
+    // A cycle is regular when it lasts 21-40 days. Every completed
+    // cycle must fall in that range for the history to count as
+    // Regular; the score is the share of completed cycles that do.
     // ---------------------------------------------------------
+
+    const REGULAR_MIN_DAYS = 21;
+    const REGULAR_MAX_DAYS = 40;
 
     let regularity = "—";
     let regularityScore = 0;
 
-    if (history.length >= 2) {
-      const differences = [];
+    const completedCycleLengths = history
+      .map((record) => record.actualCycleLength)
+      .filter((length) => length !== null);
 
-      for (let index = 1; index < history.length; index++) {
-        differences.push(
-          dayjs(history[index].periodDate).diff(
-            dayjs(history[index - 1].periodDate),
-            "day"
-          )
-        );
-      }
-
-      const average =
-        differences.reduce(
-          (sum, value) => sum + value,
-          0
-        ) / differences.length;
-
-      const variance =
-        differences.reduce(
-          (sum, value) =>
-            sum + Math.abs(value - average),
-          0
-        ) / differences.length;
+    if (completedCycleLengths.length > 0) {
+      const regularCount = completedCycleLengths.filter(
+        (length) =>
+          length >= REGULAR_MIN_DAYS &&
+          length <= REGULAR_MAX_DAYS
+      ).length;
 
       regularity =
-        variance <= 2
+        regularCount === completedCycleLengths.length
           ? "Regular"
           : "Irregular";
 
-      regularityScore = Math.max(
-        0,
-        Math.min(
-          100,
-          Math.round(100 - variance * 8)
-        )
+      regularityScore = Math.round(
+        (regularCount / completedCycleLengths.length) * 100
       );
     }
 
