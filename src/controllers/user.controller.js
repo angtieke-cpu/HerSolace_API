@@ -1849,22 +1849,18 @@ exports.markNotificationViewed = async (req, res) => {
  *
  * Saves contact details from the FAQ popup.
  */
+
 exports.createFaqLead = async (req, res) => {
   try {
-    const { name, mobileNumber, email } = req.body || {};
+    const { name, mobileNumber, email, contact } = req.body || {};
 
     const cleanName =
       typeof name === "string" ? name.trim() : "";
 
-    const cleanMobile =
-      mobileNumber == null
-        ? ""
-        : String(mobileNumber).trim();
-
-    const cleanEmail =
-      typeof email === "string"
-        ? email.trim().toLowerCase()
-        : "";
+    // Support combined input and existing API fields
+    const contactValue = String(
+      contact ?? mobileNumber ?? email ?? ""
+    ).trim();
 
     if (!cleanName || cleanName.length > 150) {
       return res.status(400).json({
@@ -1873,35 +1869,31 @@ exports.createFaqLead = async (req, res) => {
       });
     }
 
-    if (!cleanMobile && !cleanEmail) {
+    const invalidContactMessage =
+      "Please enter valid mobile number or email address";
+
+    // Validate Indian mobile number (10 digits)
+    const isValidMobile = /^[6-9][0-9]{9}$/.test(contactValue);
+
+    // Validate email
+    const isValidEmail =
+      contactValue.length <= 255 &&
+      /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactValue);
+
+    if (!isValidMobile && !isValidEmail) {
       return res.status(400).json({
         success: false,
-        message: "Mobile number or email is required"
+        message: invalidContactMessage
       });
     }
 
-    if (
-      cleanMobile &&
-      !/^[0-9]{10}$/.test(cleanMobile)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Mobile number must contain 10 digits"
-      });
-    }
+    const cleanMobile = isValidMobile
+      ? contactValue
+      : null;
 
-    if (
-      cleanEmail &&
-      (
-        cleanEmail.length > 255 ||
-        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)
-      )
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid email address"
-      });
-    }
+    const cleanEmail = isValidEmail
+      ? contactValue.toLowerCase()
+      : null;
 
     const result = await db.query(
       `
@@ -1916,8 +1908,8 @@ exports.createFaqLead = async (req, res) => {
       `,
       [
         cleanName,
-        cleanMobile || null,
-        cleanEmail || null,
+        cleanMobile,
+        cleanEmail,
         "hersolace_faq"
       ]
     );
@@ -1944,7 +1936,7 @@ exports.createFaqLead = async (req, res) => {
   }
 };
 
-
+  
 /**
  * POST /api/faq/track
  * Public API - No token required
