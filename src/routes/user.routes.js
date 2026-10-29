@@ -17,7 +17,8 @@ const { getEnabledUserSymptoms } = require("../controllers/user.controller");
 const { saveUserSymptomConfiguration } = require("../controllers/user.controller"); 
 const { getDashboardConfig } = require("../controllers/user.controller"); 
 const { saveDashboardConfig } = require("../controllers/user.controller"); 
-const { markNotificationViewed } = require("../controllers/user.controller"); 
+const { createFaqLead } = require("../controllers/user.controller"); 
+const { trackFaqEvent } = require("../controllers/user.controller"); 
 
 
 router.post("/user-details", authenticate, updateUserProfile);
@@ -37,5 +38,7 @@ router.post("/user-config", authenticate, saveUserSymptomConfiguration);
 router.get("/dashboard-config", authenticate, getDashboardConfig);
 router.post("/dashboard-config", authenticate, saveDashboardConfig);
 router.post("/user-notifications", authenticate, markNotificationViewed);
+router.post("/faq/leads", createFaqLead);
+router.post("/faq/track", trackFaqEvent);
 
 module.exports = router;
