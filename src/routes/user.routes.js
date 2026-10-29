@@ -17,6 +17,7 @@ const { getEnabledUserSymptoms } = require("../controllers/user.controller");
 const { saveUserSymptomConfiguration } = require("../controllers/user.controller"); 
 const { getDashboardConfig } = require("../controllers/user.controller"); 
 const { saveDashboardConfig } = require("../controllers/user.controller"); 
+const { markNotificationViewed } = require("../controllers/user.controller");
 const { createFaqLead } = require("../controllers/user.controller"); 
 const { trackFaqEvent } = require("../controllers/user.controller"); 
 
