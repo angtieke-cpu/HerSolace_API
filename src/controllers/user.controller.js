@@ -1842,3 +1842,273 @@ exports.markNotificationViewed = async (req, res) => {
     }
 
 };
+
+/**
+ * POST /api/faq/leads
+ * Public API - No token required
+ *
+ * Saves contact details from the FAQ popup.
+ */
+exports.createFaqLead = async (req, res) => {
+  try {
+    const { name, mobileNumber, email } = req.body || {};
+
+    const cleanName =
+      typeof name === "string" ? name.trim() : "";
+
+    const cleanMobile =
+      mobileNumber == null
+        ? ""
+        : String(mobileNumber).trim();
+
+    const cleanEmail =
+      typeof email === "string"
+        ? email.trim().toLowerCase()
+        : "";
+
+    if (!cleanName || cleanName.length > 150) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid name is required"
+      });
+    }
+
+    if (!cleanMobile && !cleanEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "Mobile number or email is required"
+      });
+    }
+
+    if (
+      cleanMobile &&
+      !/^[0-9]{10}$/.test(cleanMobile)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Mobile number must contain 10 digits"
+      });
+    }
+
+    if (
+      cleanEmail &&
+      (
+        cleanEmail.length > 255 ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid email address"
+      });
+    }
+
+    const result = await db.query(
+      `
+      INSERT INTO psg_2026 (
+        name,
+        mobile_number,
+        email,
+        source
+      )
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, name, created_at
+      `,
+      [
+        cleanName,
+        cleanMobile || null,
+        cleanEmail || null,
+        "hersolace_faq"
+      ]
+    );
+
+    const lead = result.rows[0];
+
+    return res.status(201).json({
+      success: true,
+      message: "Contact details saved successfully",
+      data: {
+        leadId: lead.id,
+        name: lead.name,
+        createdAt: lead.created_at
+      }
+    });
+
+  } catch (error) {
+    console.error("createFaqLead error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to save contact details"
+    });
+  }
+};
+
+
+/**
+ * POST /api/faq/track
+ * Public API - No token required
+ *
+ * Tracks:
+ * 1. First FAQ question opened
+ * 2. Decode More button clicked
+ */
+exports.trackFaqEvent = async (req, res) => {
+  try {
+    const {
+      leadId,
+      eventType,
+      questionId
+    } = req.body || {};
+
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+    if (
+      typeof leadId !== "string" ||
+      !uuidRegex.test(leadId)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid leadId is required"
+      });
+    }
+
+    if (
+      ![
+        "question_opened",
+        "decode_more_clicked"
+      ].includes(eventType)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid eventType"
+      });
+    }
+
+    const faqTitles = {
+      1: "Low Battery",
+      2: "Brain Fog",
+      3: "Mood Waves",
+      4: "Sleep Debt",
+      5: "Stress Overload",
+      6: "Craving Comfort",
+      7: "Period Discomfort",
+      8: "Overthinking",
+      9: "Feeling Disconnected",
+      10: "Full of Energy"
+    };
+
+    let result;
+
+    if (eventType === "question_opened") {
+      const id = Number(questionId);
+
+      if (
+        !Number.isInteger(id) ||
+        !faqTitles[id]
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Valid questionId is required"
+        });
+      }
+
+      // COALESCE ensures the first question is never overwritten.
+      result = await db.query(
+        `
+        UPDATE psg_2026
+        SET
+          first_question_id =
+            COALESCE(first_question_id, $2),
+
+          first_question_title =
+            CASE
+              WHEN first_question_id IS NULL
+              THEN $3
+              ELSE first_question_title
+            END,
+
+          first_question_clicked_at =
+            COALESCE(
+              first_question_clicked_at,
+              NOW()
+            ),
+
+          updated_at = NOW()
+
+        WHERE id = $1
+
+        RETURNING
+          id,
+          first_question_id,
+          first_question_title,
+          first_question_clicked_at
+        `,
+        [leadId, id, faqTitles[id]]
+      );
+    }
+
+    if (eventType === "decode_more_clicked") {
+      let decodeQuestionId = null;
+
+      if (
+        questionId !== null &&
+        questionId !== undefined
+      ) {
+        decodeQuestionId = Number(questionId);
+
+        if (
+          !Number.isInteger(decodeQuestionId) ||
+          !faqTitles[decodeQuestionId]
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid questionId"
+          });
+        }
+      }
+
+      result = await db.query(
+        `
+        UPDATE psg_2026
+        SET
+          decode_more_clicked = TRUE,
+          decode_more_clicked_at = NOW(),
+          decode_more_question_id = $2,
+          updated_at = NOW()
+        WHERE id = $1
+
+        RETURNING
+          id,
+          decode_more_clicked,
+          decode_more_clicked_at,
+          decode_more_question_id
+        `,
+        [leadId, decodeQuestionId]
+      );
+    }
+
+    if (!result.rows.length) {
+      return res.status(404).json({
+        success: false,
+        message: "FAQ contact record not found"
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "FAQ activity tracked successfully",
+      data: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error("trackFaqEvent error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to track FAQ activity"
+    });
+  }
+};
+
