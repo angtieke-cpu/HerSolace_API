@@ -38,7 +38,7 @@ router.post("/user-config", authenticate, saveUserSymptomConfiguration);
 router.get("/dashboard-config", authenticate, getDashboardConfig);
 router.post("/dashboard-config", authenticate, saveDashboardConfig);
 router.post("/user-notifications", authenticate, markNotificationViewed);
-router.post("/faq/leads", createFaqLead);
-router.post("/faq/track", trackFaqEvent);
+router.post("/leads", createFaqLead);
+router.post("/track", trackFaqEvent);
 
 module.exports = router;
